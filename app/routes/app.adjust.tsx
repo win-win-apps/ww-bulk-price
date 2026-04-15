@@ -406,14 +406,6 @@ export default function AdjustPage() {
       return null;
     }
     if (step === 2) {
-      const n = Number(amount);
-      if (Number.isNaN(n)) return "Enter a valid number for the price change amount.";
-      if (ruleKind === "adjust" && n === 0 && compareAt === "leave") {
-        return "Amount can not be zero if there is nothing else to change.";
-      }
-      return null;
-    }
-    if (step === 3) {
       if (scopeMode === "specific" && pickedProducts.length === 0 && pickedVariants.length === 0) {
         return "Pick at least one product or variant, or switch to a different scope.";
       }
@@ -421,6 +413,14 @@ export default function AdjustPage() {
         if (conditions.length === 0) return "Add at least one condition or switch to All products.";
         const missing = conditions.some((c) => !c.value.trim());
         if (missing) return "Fill in a value for every condition row.";
+      }
+      return null;
+    }
+    if (step === 3) {
+      const n = Number(amount);
+      if (Number.isNaN(n)) return "Enter a valid number for the price change amount.";
+      if (ruleKind === "adjust" && n === 0 && compareAt === "leave") {
+        return "Amount can not be zero if there is nothing else to change.";
       }
       return null;
     }
@@ -575,7 +575,7 @@ export default function AdjustPage() {
 
           <Stepper
             currentStep={currentStep}
-            steps={["Title", "Pricing rule", "Which products", "Review & apply"]}
+            steps={["Title", "Which products", "Pricing rule", "Review & apply"]}
             onJump={(n) => {
               // Only allow jumping back, never forward past unvalidated steps
               if (n < currentStep) {
@@ -606,12 +606,12 @@ export default function AdjustPage() {
           </Card>
           </div>
 
-          {/* Step 2: Price rule */}
-          <div style={{ display: currentStep === 2 ? undefined : "none" }}>
+          {/* Step 3: Price rule */}
+          <div style={{ display: currentStep === 3 ? undefined : "none" }}>
           <Card>
             <BlockStack gap="400">
               <InlineStack gap="200" blockAlign="center">
-                <Text as="h2" variant="headingMd">Step 2.</Text>
+                <Text as="h2" variant="headingMd">Step 3.</Text>
                 <Text as="span" variant="headingMd" tone="subdued">Select how prices should change</Text>
               </InlineStack>
 
@@ -790,12 +790,12 @@ export default function AdjustPage() {
           </Card>
           </div>
 
-          {/* Step 3: Scope */}
-          <div style={{ display: currentStep === 3 ? undefined : "none" }}>
+          {/* Step 2: Scope */}
+          <div style={{ display: currentStep === 2 ? undefined : "none" }}>
           <Card>
             <BlockStack gap="400">
               <InlineStack gap="200" blockAlign="center">
-                <Text as="h2" variant="headingMd">Step 3.</Text>
+                <Text as="h2" variant="headingMd">Step 2.</Text>
                 <Text as="span" variant="headingMd" tone="subdued">Select which products should change in price</Text>
               </InlineStack>
 
