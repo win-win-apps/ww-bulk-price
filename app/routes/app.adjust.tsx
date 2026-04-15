@@ -364,7 +364,7 @@ export default function AdjustPage() {
   }, [previewFetcher]);
 
   const [title, setTitle] = useState<string>(defaultTitle());
-  const [ruleKind, setRuleKind] = useState<"adjust" | "sale">("adjust");
+  const [ruleKind, setRuleKind] = useState<"adjust" | "sale">("sale");
   const [mode, setMode] = useState<AdjustmentMode>("percent");
   const [amount, setAmount] = useState<string>("10");
   const [rounding, setRounding] = useState<RoundingRule>("none");
@@ -614,26 +614,21 @@ export default function AdjustPage() {
                 <Text as="span" variant="headingMd" tone="subdued">Select how prices should change</Text>
               </InlineStack>
 
-              <ChoiceList
-                title=""
-                titleHidden
-                selected={[ruleKind]}
-                choices={[
-                  {
-                    label: "Use bulk price change rules",
-                    value: "adjust",
-                    helpText: "Adjust regular price by a percent, fixed amount, or set to a specific value.",
-                  },
-                  {
-                    label: "Create sale",
-                    value: "sale",
-                    helpText: "Drop the price by a percent and move the original price to compare-at (strikethrough).",
-                    renderChildren: () => <Badge tone="success">shortcut</Badge>,
-                  },
-                ]}
-                onChange={(v) => setRuleKind((v[0] || "adjust") as "adjust" | "sale")}
-                name="rule_kind"
-              />
+              <input type="hidden" name="rule_kind" value={ruleKind} />
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <RuleKindTile
+                  selected={ruleKind === "sale"}
+                  onClick={() => setRuleKind("sale")}
+                  title="Sale"
+                  subtext="Drop the price by a percent and move the original to compare-at for a strikethrough."
+                />
+                <RuleKindTile
+                  selected={ruleKind === "adjust"}
+                  onClick={() => setRuleKind("adjust")}
+                  title="Custom price adjustment"
+                  subtext="Change price by a percent, a fixed amount, or set it to a specific value."
+                />
+              </div>
 
               <Divider />
 
@@ -1395,6 +1390,48 @@ function ConditionRow({
         )}
       </InlineStack>
     </Box>
+  );
+}
+
+/**
+ * Clickable card used in step 2 to pick between Sale and Custom price
+ * adjustment. Highlights the selected tile with a brand-colored border.
+ */
+function RuleKindTile({
+  selected,
+  onClick,
+  title,
+  subtext,
+}: {
+  selected: boolean;
+  onClick: () => void;
+  title: string;
+  subtext: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={selected}
+      style={{
+        textAlign: "left",
+        padding: 14,
+        borderRadius: 10,
+        cursor: "pointer",
+        border: selected
+          ? "2px solid var(--p-color-border-focus)"
+          : "1px solid var(--p-color-border)",
+        background: selected
+          ? "var(--p-color-bg-surface-selected)"
+          : "var(--p-color-bg-surface)",
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+      }}
+    >
+      <Text as="span" variant="headingSm">{title}</Text>
+      <Text as="span" variant="bodySm" tone="subdued">{subtext}</Text>
+    </button>
   );
 }
 
