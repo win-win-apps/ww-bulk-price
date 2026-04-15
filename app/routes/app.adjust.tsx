@@ -355,13 +355,13 @@ export default function AdjustPage() {
     setPreviewPage(0);
   }, [previewPayload?.totalMatched]);
 
-  const computePreview = useCallback(() => {
-    const form = formRef.current;
-    if (!form) return;
-    const fd = new FormData(form);
-    fd.set("intent", "preview");
-    previewFetcher.submit(fd, { method: "post" });
-  }, [previewFetcher]);
+  // Scope signature tracking. When the merchant changes the scope (specific
+  // products, conditions, etc.) the previewPayload held by the fetcher is
+  // stale until a fresh submit returns. We track the signature submitted at
+  // the time of the last fetch and compare it against the current signature
+  // before treating the payload as usable for the sample.
+  const lastSubmittedScopeKeyRef = useRef<string>("");
+  const [settledScopeKey, setSettledScopeKey] = useState<string>("");
 
   const [title, setTitle] = useState<string>(defaultTitle());
   const [ruleKind, setRuleKind] = useState<"adjust" | "sale">("sale");
@@ -389,6 +389,43 @@ export default function AdjustPage() {
   const [conditions, setConditions] = useState<Condition[]>([
     { field: "product_collection", operator: "is", value: "" },
   ]);
+
+  // Derived signature of the current scope selection. Used to detect when the
+  // previewPayload still belongs to an earlier selection and should not be
+  // used to pick the storefront example.
+  const scopeKey = useMemo(
+    () =>
+      JSON.stringify({
+        s: scopeMode,
+        p: [...pickedProducts].map((p) => p.id).sort(),
+        v: [...pickedVariants].map((v) => v.id).sort(),
+        c: conditions.map((c) => `${c.field}|${c.operator}|${c.value}`),
+        j: conjunction,
+      }),
+    [scopeMode, pickedProducts, pickedVariants, conditions, conjunction]
+  );
+
+  const computePreview = useCallback(() => {
+    const form = formRef.current;
+    if (!form) return;
+    const fd = new FormData(form);
+    fd.set("intent", "preview");
+    // Capture the scope signature we are submitting now. The effect below
+    // copies this into settledScopeKey once the fetcher returns.
+    lastSubmittedScopeKeyRef.current = scopeKey;
+    previewFetcher.submit(fd, { method: "post" });
+  }, [previewFetcher, scopeKey]);
+
+  // When the fetcher transitions back to idle with new data, mark whichever
+  // scope key it was submitted under as "settled". The sample useMemo then
+  // trusts previewPayload only while settledScopeKey matches scopeKey.
+  useEffect(() => {
+    if (previewFetcher.state === "idle" && previewFetcher.data) {
+      setSettledScopeKey(lastSubmittedScopeKeyRef.current);
+    }
+  }, [previewFetcher.state, previewFetcher.data]);
+
+  const previewIsFresh = settledScopeKey !== "" && settledScopeKey === scopeKey;
 
   // Re-run the preview whenever the merchant enters Step 3 or Step 4. Step 3
   // uses it only to grab one real matched variant as the storefront example
@@ -529,11 +566,14 @@ export default function AdjustPage() {
   // from the previewFetcher results), and falls back to the generic store
   // sample only if no scoped match is available yet.
   const preview = useMemo(() => {
-    // Prefer a real matched variant from the current scope so the merchant
-    // sees a product they actually selected, with its own image.
-    const scoped = previewPayload && previewPayload.diffs && previewPayload.diffs[0]
-      ? previewPayload.diffs[0]
-      : null;
+    // Prefer a real matched variant from the current scope, but only if the
+    // previewPayload was computed against the current scope. Otherwise the
+    // sample would be a leftover from a prior selection while the new
+    // fetcher is still in flight.
+    const scoped =
+      previewIsFresh && previewPayload && previewPayload.diffs && previewPayload.diffs[0]
+        ? previewPayload.diffs[0]
+        : null;
 
     type SampleSource = {
       title: string;
@@ -600,7 +640,7 @@ export default function AdjustPage() {
       afterPrice: fmt(after),
       afterCompare: compareAfter ? `$${Number(compareAfter).toFixed(2)}` : null,
     };
-  }, [previewPayload, data.sampleVariant, amount, mode, rounding, compareAt, ruleKind]);
+  }, [previewIsFresh, previewPayload, data.sampleVariant, amount, mode, rounding, compareAt, ruleKind]);
 
   return (
     <Page
@@ -661,13 +701,28 @@ export default function AdjustPage() {
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                 <RuleKindTile
                   selected={ruleKind === "sale"}
-                  onClick={() => setRuleKind("sale")}
+                  onClick={() => {
+                    setRuleKind("sale");
+                    // sale mode expects a positive percent off, flip the
+                    // sign so merchants who typed -10 in custom dont confuse
+                    // themselves with "-10% off"
+                    setAmount((prev) => {
+                      const n = Number(prev);
+                      if (Number.isNaN(n) || n === 0) return "10";
+                      return String(Math.abs(n));
+                    });
+                  }}
                   title="Sale"
                   subtext="Drop the price by a percent and move the original to compare-at for a strikethrough."
                 />
                 <RuleKindTile
                   selected={ruleKind === "adjust"}
-                  onClick={() => setRuleKind("adjust")}
+                  onClick={() => {
+                    setRuleKind("adjust");
+                    // default to a 10 percent reduction, which is the most
+                    // common custom adjustment merchants reach for
+                    setAmount("-10");
+                  }}
                   title="Custom price adjustment"
                   subtext="Change price by a percent, a fixed amount, or set it to a specific value."
                 />
@@ -715,6 +770,15 @@ export default function AdjustPage() {
                   autoComplete="off"
                   suffix={mode === "percent" && ruleKind === "adjust" ? "%" : ruleKind === "sale" ? "% off" : undefined}
                   prefix={mode !== "percent" && ruleKind === "adjust" ? "$" : undefined}
+                  helpText={
+                    ruleKind === "adjust" && mode !== "set_to"
+                      ? (() => {
+                          const n = Number(amount);
+                          if (Number.isNaN(n) || n === 0) return undefined;
+                          return n > 0 ? "Price increase" : "Price reduction";
+                        })()
+                      : undefined
+                  }
                 />
                 <Button
                   variant="plain"
