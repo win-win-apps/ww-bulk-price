@@ -46,10 +46,29 @@ type LoaderData = {
     compareAtPrice: string | null;
     currency: string;
   } | null;
+  // Facets used by the condition row value selectors so merchants pick from
+  // real values in their store instead of typing free text.
+  productTypes: string[];
+  vendors: string[];
+  tags: string[];
+  variantTitles: string[];
+  productTitles: string[];
 };
 
 function collectFacets(variants: VariantRow[]): LoaderData {
   const first = variants[0];
+  const productTypes = new Set<string>();
+  const vendors = new Set<string>();
+  const tags = new Set<string>();
+  const variantTitles = new Set<string>();
+  const productTitles = new Set<string>();
+  for (const v of variants) {
+    if (v.productType) productTypes.add(v.productType);
+    if (v.vendor) vendors.add(v.vendor);
+    for (const t of v.tags || []) if (t) tags.add(t);
+    if (v.variantTitle) variantTitles.add(v.variantTitle);
+    if (v.productTitle) productTitles.add(v.productTitle);
+  }
   return {
     totalVariants: variants.length,
     sampleVariant: first
@@ -60,6 +79,13 @@ function collectFacets(variants: VariantRow[]): LoaderData {
           currency: first.currencyCode,
         }
       : null,
+    productTypes: Array.from(productTypes).sort(),
+    vendors: Array.from(vendors).sort(),
+    tags: Array.from(tags).sort(),
+    variantTitles: Array.from(variantTitles).sort(),
+    // Cap product titles to keep payload bounded on large stores; merchants can
+    // always switch to "contains" to hand-type for giant catalogs.
+    productTitles: Array.from(productTitles).sort().slice(0, 500),
   };
 }
 
@@ -741,6 +767,13 @@ export default function AdjustPage() {
                             condition={c}
                             onChange={(patch) => updateCondition(idx, patch)}
                             onDelete={conditions.length > 1 ? () => removeCondition(idx) : undefined}
+                            facets={{
+                              productTypes: data.productTypes,
+                              vendors: data.vendors,
+                              tags: data.tags,
+                              variantTitles: data.variantTitles,
+                              productTitles: data.productTitles,
+                            }}
                           />
                         ))}
                       </BlockStack>
@@ -797,18 +830,32 @@ export default function AdjustPage() {
   );
 }
 
+type ConditionFacets = {
+  productTypes: string[];
+  vendors: string[];
+  tags: string[];
+  variantTitles: string[];
+  productTitles: string[];
+};
+
 /**
  * One row in the conditions list. Field + operator + value + delete.
  * Operator and value control dynamically update when the field changes.
+ * Value control is chosen based on the field type and the available facets:
+ * enumerable fields (vendor, type, tag, status, gift card, etc) get a
+ * real Select populated from the store's own values when the operator is
+ * "is" / "is not", and fall back to a TextField for partial-match operators.
  */
 function ConditionRow({
   condition,
   onChange,
   onDelete,
+  facets,
 }: {
   condition: Condition;
   onChange: (patch: Partial<Condition>) => void;
   onDelete?: () => void;
+  facets: ConditionFacets;
 }) {
   const def = FIELD_DEFS[condition.field];
   const fieldOptions = (Object.keys(FIELD_DEFS) as ConditionField[]).map((f) => ({
@@ -819,6 +866,26 @@ function ConditionRow({
     label: OPERATOR_LABELS[op],
     value: op,
   }));
+
+  // Pick the facet list for the currently-selected field. Text-kind fields
+  // that have enumerable values get a Select; others fall through to a
+  // TextField. "is" and "is_not" use the Select form; partial-match operators
+  // (contains, starts_with, ends_with) use TextField because the value is not
+  // necessarily one of the known facet values.
+  const facetForField: string[] | null = (() => {
+    switch (condition.field) {
+      case "product_type": return facets.productTypes;
+      case "vendor": return facets.vendors;
+      case "tag": return facets.tags;
+      case "variant_title": return facets.variantTitles;
+      case "product_title": return facets.productTitles;
+      default: return null;
+    }
+  })();
+  const useFacetSelect =
+    facetForField != null &&
+    facetForField.length > 0 &&
+    (condition.operator === "is" || condition.operator === "is_not");
 
   let valueControl: React.ReactNode;
   if (def.valueKind === "status") {
@@ -860,6 +927,20 @@ function ConditionRow({
         type="number"
         autoComplete="off"
         placeholder="0"
+        suffix="units"
+      />
+    );
+  } else if (useFacetSelect && facetForField) {
+    valueControl = (
+      <Select
+        label=""
+        labelHidden
+        options={[
+          { label: `Select ${def.label.replace(/^The /, "").replace(/'s /, " ")}`, value: "" },
+          ...facetForField.map((v) => ({ label: v, value: v })),
+        ]}
+        value={condition.value}
+        onChange={(v) => onChange({ value: v })}
       />
     );
   } else {
