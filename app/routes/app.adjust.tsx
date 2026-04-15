@@ -333,6 +333,12 @@ export default function AdjustPage() {
   const shopify = useAppBridge();
   const submitting = nav.state !== "idle";
 
+  // Guided flow: 4 steps, each in its own panel. We use display:none to hide
+  // inactive panels so form inputs from earlier steps remain mounted and are
+  // included in the final apply submit.
+  const [currentStep, setCurrentStep] = useState<1 | 2 | 3 | 4>(1);
+  const [stepError, setStepError] = useState<string | null>(null);
+
   // Fetcher for the inline preview under Step 3. Uses intent=preview to tell
   // the action to return JSON instead of staging and redirecting.
   const previewFetcher = useFetcher<any>();
@@ -356,19 +362,6 @@ export default function AdjustPage() {
     fd.set("intent", "preview");
     previewFetcher.submit(fd, { method: "post" });
   }, [previewFetcher]);
-
-  // Auto-run the preview once on mount so merchants see it without clicking.
-  // The default state (adjust by 10% on all products) is a valid rule so this
-  // always returns something on a fresh page load.
-  const didAutoPreview = useRef(false);
-  useEffect(() => {
-    if (didAutoPreview.current) return;
-    didAutoPreview.current = true;
-    // Defer one tick so the form ref is attached and the hidden inputs are
-    // populated from initial state.
-    const t = setTimeout(() => computePreview(), 0);
-    return () => clearTimeout(t);
-  }, [computePreview]);
 
   const [title, setTitle] = useState<string>(defaultTitle());
   const [ruleKind, setRuleKind] = useState<"adjust" | "sale">("adjust");
@@ -396,6 +389,59 @@ export default function AdjustPage() {
   const [conditions, setConditions] = useState<Condition[]>([
     { field: "product_collection", operator: "is", value: "" },
   ]);
+
+  // Re-run the preview whenever the merchant enters Step 4 so it always
+  // reflects the latest rule and scope.
+  useEffect(() => {
+    if (currentStep !== 4) return;
+    const t = setTimeout(() => computePreview(), 0);
+    return () => clearTimeout(t);
+  }, [currentStep, computePreview]);
+
+  // Validation for advancing to the next step. Returns an error message on
+  // failure or null when the step is valid and the merchant can proceed.
+  const validateStep = useCallback((step: 1 | 2 | 3): string | null => {
+    if (step === 1) {
+      if (!title.trim()) return "Give this job a title before continuing.";
+      return null;
+    }
+    if (step === 2) {
+      const n = Number(amount);
+      if (Number.isNaN(n)) return "Enter a valid number for the price change amount.";
+      if (ruleKind === "adjust" && n === 0 && compareAt === "leave") {
+        return "Amount can not be zero if there is nothing else to change.";
+      }
+      return null;
+    }
+    if (step === 3) {
+      if (scopeMode === "specific" && pickedProducts.length === 0 && pickedVariants.length === 0) {
+        return "Pick at least one product or variant, or switch to a different scope.";
+      }
+      if (scopeMode === "conditions") {
+        if (conditions.length === 0) return "Add at least one condition or switch to All products.";
+        const missing = conditions.some((c) => !c.value.trim());
+        if (missing) return "Fill in a value for every condition row.";
+      }
+      return null;
+    }
+    return null;
+  }, [title, amount, ruleKind, compareAt, scopeMode, pickedProducts, pickedVariants, conditions]);
+
+  const goNext = useCallback(() => {
+    if (currentStep === 4) return;
+    const err = validateStep(currentStep);
+    if (err) {
+      setStepError(err);
+      return;
+    }
+    setStepError(null);
+    setCurrentStep((s) => (s < 4 ? ((s + 1) as 1 | 2 | 3 | 4) : s));
+  }, [currentStep, validateStep]);
+
+  const goBack = useCallback(() => {
+    setStepError(null);
+    setCurrentStep((s) => (s > 1 ? ((s - 1) as 1 | 2 | 3 | 4) : s));
+  }, []);
 
   // Resource picker handlers. Uses App Bridge shopify.resourcePicker which pops
   // the native Shopify selector so merchants can pick products or variants.
@@ -518,14 +564,28 @@ export default function AdjustPage() {
   return (
     <Page
       title="Create new price change job"
-      subtitle="Adjust prices in bulk with a percent, fixed amount, or sale preset. Preview before anything is written."
+      subtitle="Guided 4 step flow. Nothing is written to your store until the final apply."
       backAction={{ url: "/app" }}
     >
       <Form method="post" ref={formRef}>
         <BlockStack gap="500">
           {actionData?.error && <Banner tone="critical" title={actionData.error} />}
+          {stepError && <Banner tone="critical" title={stepError} />}
+
+          <Stepper
+            currentStep={currentStep}
+            steps={["Title", "Pricing rule", "Which products", "Review & apply"]}
+            onJump={(n) => {
+              // Only allow jumping back, never forward past unvalidated steps
+              if (n < currentStep) {
+                setStepError(null);
+                setCurrentStep(n);
+              }
+            }}
+          />
 
           {/* Step 1: Title */}
+          <div style={{ display: currentStep === 1 ? undefined : "none" }}>
           <Card>
             <BlockStack gap="300">
               <InlineStack gap="200" blockAlign="center">
@@ -542,8 +602,10 @@ export default function AdjustPage() {
               />
             </BlockStack>
           </Card>
+          </div>
 
           {/* Step 2: Price rule */}
+          <div style={{ display: currentStep === 2 ? undefined : "none" }}>
           <Card>
             <BlockStack gap="400">
               <InlineStack gap="200" blockAlign="center">
@@ -729,8 +791,10 @@ export default function AdjustPage() {
               )}
             </BlockStack>
           </Card>
+          </div>
 
           {/* Step 3: Scope */}
+          <div style={{ display: currentStep === 3 ? undefined : "none" }}>
           <Card>
             <BlockStack gap="400">
               <InlineStack gap="200" blockAlign="center">
@@ -886,29 +950,44 @@ export default function AdjustPage() {
               )}
             </BlockStack>
           </Card>
+          </div>
 
-          {/* Inline preview. Sits right under the scope selector so merchants
-              can see the exact rows their rule will touch before they commit.
-              Powered by a fetcher that POSTs the same form with intent=preview. */}
+          {/* Step 4: Review & apply */}
+          <div style={{ display: currentStep === 4 ? undefined : "none" }}>
           <Card>
             <BlockStack gap="400">
               <InlineStack gap="200" blockAlign="center" align="space-between">
                 <InlineStack gap="200" blockAlign="center">
-                  <Text as="h2" variant="headingMd">Preview</Text>
+                  <Text as="h2" variant="headingMd">Step 4.</Text>
                   <Text as="span" variant="headingMd" tone="subdued">
-                    see the exact variants this rule will change
+                    Review the changes and apply
                   </Text>
                 </InlineStack>
                 <Button onClick={computePreview} loading={previewLoading}>
-                  {previewPayload ? "Refresh preview" : "Show preview"}
+                  Refresh preview
                 </Button>
               </InlineStack>
 
+              <ReviewSummary
+                title={title}
+                ruleKind={ruleKind}
+                mode={mode}
+                amount={amount}
+                compareAt={compareAt}
+                rounding={rounding}
+                scopeMode={scopeMode}
+                pickedProducts={pickedProducts}
+                pickedVariants={pickedVariants}
+                conditions={conditions}
+                conjunction={conjunction}
+                totalVariants={data.totalVariants}
+              />
+
               {previewError && <Banner tone="critical" title={previewError} />}
 
-              {!previewPayload && !previewError && (
+              {previewLoading && !previewPayload && (
                 <Text as="p" variant="bodyMd" tone="subdued">
-                  Click show preview once your rule and scope look right. Nothing is written to your store until you apply.
+                  Computing the list of variants that will change
                 </Text>
               )}
 
@@ -922,41 +1001,215 @@ export default function AdjustPage() {
               )}
             </BlockStack>
           </Card>
+          </div>
 
-          {/* Step 4: When */}
-          <Card>
-            <BlockStack gap="300">
-              <InlineStack gap="200" blockAlign="center">
-                <Text as="h2" variant="headingMd">Step 4.</Text>
-                <Text as="span" variant="headingMd" tone="subdued">Select when the prices should change</Text>
-              </InlineStack>
-              <ChoiceList
-                title=""
-                titleHidden
-                selected={["now"]}
-                choices={[
-                  { label: "Change prices now", value: "now" },
-                  {
-                    label: "Change prices later",
-                    value: "later",
-                    disabled: true,
-                    helpText: "Coming in v1.1. Ping us if this is blocking you.",
-                  },
-                ]}
-                onChange={() => { /* fixed to "now" in v1 */ }}
-              />
-            </BlockStack>
-          </Card>
-
-          <InlineStack gap="200" align="end">
-            <Button url="/app">Cancel</Button>
-            <Button submit variant="primary" loading={submitting}>
-              Preview changes
-            </Button>
+          {/* Guided nav. Back / Next on steps 1-3, Back / Apply on step 4. */}
+          <InlineStack gap="200" align="space-between">
+            <InlineStack gap="200">
+              {currentStep === 1 ? (
+                <Button url="/app">Cancel</Button>
+              ) : (
+                <Button onClick={goBack} icon={ArrowLeftIcon}>Back</Button>
+              )}
+            </InlineStack>
+            <InlineStack gap="200">
+              <Text as="span" variant="bodySm" tone="subdued">{`Step ${currentStep} of 4`}</Text>
+              {currentStep < 4 ? (
+                <Button variant="primary" onClick={goNext}>
+                  {currentStep === 3 ? "Review changes" : "Next"}
+                </Button>
+              ) : (
+                <Button
+                  submit
+                  variant="primary"
+                  loading={submitting}
+                  disabled={!previewPayload || previewPayload.totalMatched === 0}
+                >
+                  {previewPayload
+                    ? `Apply ${previewPayload.totalMatched} change${previewPayload.totalMatched === 1 ? "" : "s"}`
+                    : "Apply"}
+                </Button>
+              )}
+            </InlineStack>
           </InlineStack>
         </BlockStack>
       </Form>
     </Page>
+  );
+}
+
+/**
+ * Stepper header shown above all step panels. Each dot is clickable to go
+ * back to a previous step but cannot jump ahead past unvalidated steps.
+ */
+function Stepper({
+  currentStep,
+  steps,
+  onJump,
+}: {
+  currentStep: 1 | 2 | 3 | 4;
+  steps: string[];
+  onJump: (n: 1 | 2 | 3 | 4) => void;
+}) {
+  return (
+    <Card>
+      <InlineStack gap="200" blockAlign="center" wrap={false}>
+        {steps.map((label, i) => {
+          const num = (i + 1) as 1 | 2 | 3 | 4;
+          const done = num < currentStep;
+          const active = num === currentStep;
+          const clickable = num < currentStep;
+          return (
+            <InlineStack key={label} gap="200" blockAlign="center" wrap={false}>
+              <div
+                role={clickable ? "button" : undefined}
+                tabIndex={clickable ? 0 : -1}
+                onClick={() => clickable && onJump(num)}
+                onKeyDown={(e) => {
+                  if (clickable && (e.key === "Enter" || e.key === " ")) {
+                    e.preventDefault();
+                    onJump(num);
+                  }
+                }}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                  cursor: clickable ? "pointer" : "default",
+                  opacity: done || active ? 1 : 0.55,
+                }}
+              >
+                <div
+                  style={{
+                    width: 26,
+                    height: 26,
+                    borderRadius: 999,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontWeight: 600,
+                    fontSize: 13,
+                    color: active || done ? "#fff" : "var(--p-color-text-subdued)",
+                    background: active
+                      ? "var(--p-color-bg-fill-brand)"
+                      : done
+                      ? "var(--p-color-bg-fill-success)"
+                      : "var(--p-color-bg-surface-secondary)",
+                    border: "1px solid var(--p-color-border)",
+                  }}
+                >
+                  {done ? "\u2713" : num}
+                </div>
+                <Text as="span" variant="bodyMd" fontWeight={active ? "semibold" : "regular"}>
+                  {label}
+                </Text>
+              </div>
+              {i < steps.length - 1 && (
+                <div
+                  aria-hidden
+                  style={{
+                    width: 28,
+                    height: 2,
+                    background: "var(--p-color-border)",
+                  }}
+                />
+              )}
+            </InlineStack>
+          );
+        })}
+      </InlineStack>
+    </Card>
+  );
+}
+
+/**
+ * Plain English summary of the rule + scope shown at the top of Step 4 so
+ * merchants can double-check what they're about to apply without scrolling.
+ */
+function ReviewSummary({
+  title,
+  ruleKind,
+  mode,
+  amount,
+  compareAt,
+  rounding,
+  scopeMode,
+  pickedProducts,
+  pickedVariants,
+  conditions,
+  conjunction,
+  totalVariants,
+}: {
+  title: string;
+  ruleKind: "adjust" | "sale";
+  mode: AdjustmentMode;
+  amount: string;
+  compareAt: CompareAtMode;
+  rounding: RoundingRule;
+  scopeMode: AdjustmentScope;
+  pickedProducts: PickedProduct[];
+  pickedVariants: PickedVariant[];
+  conditions: Condition[];
+  conjunction: Conjunction;
+  totalVariants: number;
+}) {
+  const n = Number(amount) || 0;
+  let ruleText = "";
+  if (ruleKind === "sale") {
+    ruleText = `Drop price by ${Math.abs(n)}% and move original to compare-at`;
+  } else if (mode === "percent") {
+    ruleText = `${n >= 0 ? "Raise" : "Lower"} price by ${Math.abs(n)}%`;
+  } else if (mode === "fixed") {
+    ruleText = `${n >= 0 ? "Raise" : "Lower"} price by $${Math.abs(n).toFixed(2)}`;
+  } else if (mode === "set_to") {
+    ruleText = `Set price to $${n.toFixed(2)}`;
+  }
+  if (rounding !== "none" && ruleKind === "adjust") {
+    const r = rounding === "end_99" ? ".99" : rounding === "end_95" ? ".95" : "whole dollar";
+    ruleText += `, round to ${r}`;
+  }
+  if (ruleKind === "adjust" && compareAt !== "leave") {
+    const c =
+      compareAt === "sale" ? "move current price to compare-at" :
+      compareAt === "clear" ? "clear compare-at" :
+      compareAt === "percent" ? "adjust compare-at by same percent" :
+      "adjust compare-at by same amount";
+    ruleText += `, ${c}`;
+  }
+
+  let scopeText = "";
+  if (scopeMode === "all") {
+    scopeText = `All products (${totalVariants.toLocaleString()} variants)`;
+  } else if (scopeMode === "specific") {
+    const parts: string[] = [];
+    if (pickedProducts.length > 0) parts.push(`${pickedProducts.length} product${pickedProducts.length === 1 ? "" : "s"}`);
+    if (pickedVariants.length > 0) parts.push(`${pickedVariants.length} variant${pickedVariants.length === 1 ? "" : "s"}`);
+    scopeText = parts.length > 0 ? parts.join(" + ") : "nothing picked";
+  } else {
+    const conj = conjunction === "OR" ? "any" : "all";
+    scopeText = `Products matching ${conj} of ${conditions.length} condition${conditions.length === 1 ? "" : "s"}`;
+  }
+
+  return (
+    <Box
+      padding="400"
+      borderWidth="025"
+      borderColor="border"
+      borderRadius="200"
+      background="bg-surface-secondary"
+    >
+      <BlockStack gap="200">
+        <Text as="p" variant="bodyMd">
+          <Text as="span" fontWeight="semibold">Job:</Text> {title || "(untitled)"}
+        </Text>
+        <Text as="p" variant="bodyMd">
+          <Text as="span" fontWeight="semibold">Rule:</Text> {ruleText}
+        </Text>
+        <Text as="p" variant="bodyMd">
+          <Text as="span" fontWeight="semibold">Scope:</Text> {scopeText}
+        </Text>
+      </BlockStack>
+    </Box>
   );
 }
 
