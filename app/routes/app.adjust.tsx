@@ -568,6 +568,7 @@ export default function AdjustPage() {
       backAction={{ url: "/app" }}
     >
       <Form method="post" ref={formRef}>
+        <div style={{ maxWidth: 500, margin: "0 auto" }}>
         <BlockStack gap="500">
           {actionData?.error && <Banner tone="critical" title={actionData.error} />}
           {stepError && <Banner tone="critical" title={stepError} />}
@@ -1033,6 +1034,7 @@ export default function AdjustPage() {
             </InlineStack>
           </InlineStack>
         </BlockStack>
+        </div>
       </Form>
     </Page>
   );
