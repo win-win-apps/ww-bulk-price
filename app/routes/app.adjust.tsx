@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
-import { Form, useActionData, useLoaderData, useNavigation } from "@remix-run/react";
+import { Form, useActionData, useFetcher, useLoaderData, useNavigation } from "@remix-run/react";
 import {
   Page,
   Card,
@@ -17,10 +17,12 @@ import {
   Badge,
   Tag,
   Box,
+  DataTable,
+  Pagination,
 } from "@shopify/polaris";
 import { ArrowLeftIcon, DeleteIcon, PlusIcon } from "@shopify/polaris-icons";
 import { useAppBridge } from "@shopify/app-bridge-react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { authenticate } from "../shopify.server";
 import { fetchAllVariants, type VariantRow } from "../utils/shopify-queries.server";
 import {
@@ -99,6 +101,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   const body = await request.formData();
 
+  // intent: "apply" (default) stages diffs and redirects to the full preview
+  // page, "preview" returns the computed diff list as JSON so we can render
+  // an inline preview right below Step 3 without leaving the adjust page.
+  const intent = String(body.get("intent") || "apply");
   const title = String(body.get("title") || "").trim();
   const ruleKind = String(body.get("rule_kind") || "adjust"); // "adjust" | "sale"
   const mode = (String(body.get("mode") || "percent")) as AdjustmentMode;
@@ -169,6 +175,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const diffs = buildAdjustmentDiffs(input, variants);
   if (diffs.length === 0) {
     return json({ error: "No variants matched this rule. Try loosening your filter or adjusting the amount." });
+  }
+
+  // Preview intent: return the diff list and get out. Do not stage anything,
+  // do not redirect. The UI will render this inline under Step 3.
+  if (intent === "preview") {
+    return json({
+      preview: {
+        diffs,
+        totalMatched: diffs.length,
+        totalVariants: variants.length,
+      },
+    });
   }
 
   const scopeLabel =
@@ -270,12 +288,58 @@ const OPERATOR_LABELS: Record<ConditionOperator, string> = {
 type PickedProduct = { id: string; title: string };
 type PickedVariant = { id: string; title: string; productTitle: string };
 
+type PreviewDiff = {
+  variantId: string;
+  productId: string;
+  productTitle: string;
+  variantTitle: string;
+  sku: string | null;
+  before: { price: string; compareAtPrice: string | null };
+  after: { price: string; compareAtPrice: string | null };
+  priceChanged: boolean;
+  compareChanged: boolean;
+  pctChange: number | null;
+  flags: string[];
+};
+
+type PreviewPayload = {
+  preview: {
+    diffs: PreviewDiff[];
+    totalMatched: number;
+    totalVariants: number;
+  };
+};
+
 export default function AdjustPage() {
   const data = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>() as { error?: string } | undefined;
   const nav = useNavigation();
   const shopify = useAppBridge();
   const submitting = nav.state !== "idle";
+
+  // Fetcher for the inline preview under Step 3. Uses intent=preview to tell
+  // the action to return JSON instead of staging and redirecting.
+  const previewFetcher = useFetcher<any>();
+  const formRef = useRef<HTMLFormElement>(null);
+  const previewLoading = previewFetcher.state !== "idle";
+  const previewPayload: PreviewPayload["preview"] | null =
+    previewFetcher.data && previewFetcher.data.preview ? previewFetcher.data.preview : null;
+  const previewError: string | null =
+    previewFetcher.data && previewFetcher.data.error ? previewFetcher.data.error : null;
+  const [previewPage, setPreviewPage] = useState(0);
+  const previewPageSize = 50;
+  // reset page when a new result comes in
+  useEffect(() => {
+    setPreviewPage(0);
+  }, [previewPayload?.totalMatched]);
+
+  const computePreview = useCallback(() => {
+    const form = formRef.current;
+    if (!form) return;
+    const fd = new FormData(form);
+    fd.set("intent", "preview");
+    previewFetcher.submit(fd, { method: "post" });
+  }, [previewFetcher]);
 
   const [title, setTitle] = useState<string>(defaultTitle());
   const [ruleKind, setRuleKind] = useState<"adjust" | "sale">("adjust");
@@ -428,7 +492,7 @@ export default function AdjustPage() {
       subtitle="Adjust prices in bulk with a percent, fixed amount, or sale preset. Preview before anything is written."
       backAction={{ url: "/app" }}
     >
-      <Form method="post">
+      <Form method="post" ref={formRef}>
         <BlockStack gap="500">
           {actionData?.error && <Banner tone="critical" title={actionData.error} />}
 
@@ -793,6 +857,42 @@ export default function AdjustPage() {
             </BlockStack>
           </Card>
 
+          {/* Inline preview. Sits right under the scope selector so merchants
+              can see the exact rows their rule will touch before they commit.
+              Powered by a fetcher that POSTs the same form with intent=preview. */}
+          <Card>
+            <BlockStack gap="400">
+              <InlineStack gap="200" blockAlign="center" align="space-between">
+                <InlineStack gap="200" blockAlign="center">
+                  <Text as="h2" variant="headingMd">Preview</Text>
+                  <Text as="span" variant="headingMd" tone="subdued">
+                    see the exact variants this rule will change
+                  </Text>
+                </InlineStack>
+                <Button onClick={computePreview} loading={previewLoading}>
+                  {previewPayload ? "Refresh preview" : "Show preview"}
+                </Button>
+              </InlineStack>
+
+              {previewError && <Banner tone="critical" title={previewError} />}
+
+              {!previewPayload && !previewError && (
+                <Text as="p" variant="bodyMd" tone="subdued">
+                  Click show preview once your rule and scope look right. Nothing is written to your store until you apply.
+                </Text>
+              )}
+
+              {previewPayload && (
+                <InlinePreviewTable
+                  diffs={previewPayload.diffs}
+                  page={previewPage}
+                  pageSize={previewPageSize}
+                  onPageChange={setPreviewPage}
+                />
+              )}
+            </BlockStack>
+          </Card>
+
           {/* Step 4: When */}
           <Card>
             <BlockStack gap="300">
@@ -996,6 +1096,116 @@ function ConditionRow({
         )}
       </InlineStack>
     </Box>
+  );
+}
+
+/**
+ * Paginated diff table used in the inline preview card below Step 3.
+ * Shows current price, current compare-at, new price, new compare-at,
+ * change percent, and any flag badge, with client-side pagination.
+ */
+function InlinePreviewTable({
+  diffs,
+  page,
+  pageSize,
+  onPageChange,
+}: {
+  diffs: PreviewDiff[];
+  page: number;
+  pageSize: number;
+  onPageChange: (p: number) => void;
+}) {
+  const totalPages = Math.max(1, Math.ceil(diffs.length / pageSize));
+  const pageStart = page * pageSize;
+  const pageEnd = Math.min(pageStart + pageSize, diffs.length);
+  const pagedDiffs = diffs.slice(pageStart, pageEnd);
+  const flagged = diffs.filter((d) => d.flags.length > 0).length;
+
+  if (diffs.length === 0) {
+    return (
+      <Text as="p" variant="bodyMd" tone="subdued">
+        No variants matched this rule. Try loosening your filter or adjusting the amount.
+      </Text>
+    );
+  }
+
+  const rows: Array<Array<React.ReactNode>> = pagedDiffs.map((d) => {
+    const curPrice = d.before.price ?? "-";
+    const curCompare = d.before.compareAtPrice ?? "-";
+    const newPrice = d.after.price ?? "-";
+    const newCompare = d.after.compareAtPrice ?? (d.before.compareAtPrice ? "cleared" : "-");
+    const pct =
+      d.pctChange == null
+        ? "-"
+        : `${d.pctChange > 0 ? "+" : ""}${d.pctChange.toFixed(1)}%`;
+    const flag: React.ReactNode = d.flags.includes("big_drop") ? (
+      <Badge tone="critical">big drop</Badge>
+    ) : d.flags.includes("big_increase") ? (
+      <Badge tone="warning">big increase</Badge>
+    ) : (
+      ""
+    );
+    return [
+      d.productTitle || "-",
+      d.variantTitle || "-",
+      curPrice,
+      curCompare,
+      newPrice,
+      newCompare,
+      pct,
+      flag,
+    ];
+  });
+
+  return (
+    <BlockStack gap="300">
+      <InlineStack gap="300" blockAlign="center">
+        <Text as="span" variant="headingSm">
+          {`${diffs.length} variant${diffs.length === 1 ? "" : "s"} will change`}
+        </Text>
+        {flagged > 0 && <Badge tone="warning">{`${flagged} flagged`}</Badge>}
+      </InlineStack>
+
+      <DataTable
+        columnContentTypes={[
+          "text",
+          "text",
+          "numeric",
+          "numeric",
+          "numeric",
+          "numeric",
+          "numeric",
+          "text",
+        ]}
+        headings={[
+          "Product",
+          "Variant",
+          "Current price",
+          "Current compare-at",
+          "New price",
+          "New compare-at",
+          "Change",
+          "Flag",
+        ]}
+        rows={rows}
+        truncate
+      />
+
+      {diffs.length > pageSize && (
+        <InlineStack gap="300" align="space-between" blockAlign="center">
+          <Text as="p" tone="subdued" variant="bodySm">
+            {`Showing ${pageStart + 1} to ${pageEnd} of ${diffs.length}`}
+          </Text>
+          <Pagination
+            hasPrevious={page > 0}
+            onPrevious={() => onPageChange(Math.max(0, page - 1))}
+            hasNext={page < totalPages - 1}
+            onNext={() => onPageChange(Math.min(totalPages - 1, page + 1))}
+            label={`Page ${page + 1} of ${totalPages}`}
+          />
+        </InlineStack>
+      )}
+    </BlockStack>
   );
 }
 

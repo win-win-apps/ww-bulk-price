@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "@remix-run/node";
 import { json, redirect } from "@remix-run/node";
 import { Form, useLoaderData, useNavigation, useActionData } from "@remix-run/react";
@@ -11,6 +12,7 @@ import {
   DataTable,
   Badge,
   InlineStack,
+  Pagination,
 } from "@shopify/polaris";
 import { authenticate, prisma } from "../shopify.server";
 import { getStagedDiffs, clearStagedDiffs } from "../utils/staging.server";
@@ -130,15 +132,18 @@ export default function PreviewPage() {
   const changed = diffs.length;
   const flagged = diffs.filter((d) => d.flags.length > 0).length;
 
-  const rows: Array<Array<React.ReactNode>> = diffs.slice(0, 500).map((d) => {
-    const beforeCompare = d.before.compareAtPrice ? ` (compare at ${d.before.compareAtPrice})` : "";
-    const afterCompare = d.after.compareAtPrice
-      ? ` (compare at ${d.after.compareAtPrice})`
-      : d.before.compareAtPrice
-      ? " (compare at cleared)"
-      : "";
-    const before = `${d.before.price}${beforeCompare}`;
-    const after = `${d.after.price}${afterCompare}`;
+  const pageSize = 50;
+  const [page, setPage] = useState(0);
+  const totalPages = Math.max(1, Math.ceil(diffs.length / pageSize));
+  const pageStart = page * pageSize;
+  const pageEnd = Math.min(pageStart + pageSize, diffs.length);
+  const pagedDiffs = diffs.slice(pageStart, pageEnd);
+
+  const rows: Array<Array<React.ReactNode>> = pagedDiffs.map((d) => {
+    const curPrice = d.before.price ?? "-";
+    const curCompare = d.before.compareAtPrice ?? "-";
+    const newPrice = d.after.price ?? "-";
+    const newCompare = d.after.compareAtPrice ?? (d.before.compareAtPrice ? "cleared" : "-");
     const pct = d.pctChange == null ? "-" : `${d.pctChange > 0 ? "+" : ""}${d.pctChange.toFixed(1)}%`;
     const flag: React.ReactNode = d.flags.includes("big_drop") ? (
       <Badge tone="critical">big drop</Badge>
@@ -147,7 +152,16 @@ export default function PreviewPage() {
     ) : (
       ""
     );
-    return [d.productTitle || "-", d.variantTitle || "-", before, after, pct, flag];
+    return [
+      d.productTitle || "-",
+      d.variantTitle || "-",
+      curPrice,
+      curCompare,
+      newPrice,
+      newCompare,
+      pct,
+      flag,
+    ];
   });
 
   const backUrl = data.source === "adjustment" ? "/app/adjust" : "/app/upload";
@@ -180,15 +194,33 @@ export default function PreviewPage() {
             </InlineStack>
 
             <DataTable
-              columnContentTypes={["text", "text", "text", "text", "numeric", "text"]}
-              headings={["Product", "Variant", "Before", "After", "Change", "Flag"]}
+              columnContentTypes={["text", "text", "numeric", "numeric", "numeric", "numeric", "numeric", "text"]}
+              headings={[
+                "Product",
+                "Variant",
+                "Current price",
+                "Current compare-at",
+                "New price",
+                "New compare-at",
+                "Change",
+                "Flag",
+              ]}
               rows={rows}
               truncate
             />
-            {diffs.length > 500 && (
-              <Text as="p" tone="subdued" variant="bodySm">
-                Showing first 500 rows. All {diffs.length} changes will be applied.
-              </Text>
+            {diffs.length > pageSize && (
+              <InlineStack gap="300" align="space-between" blockAlign="center">
+                <Text as="p" tone="subdued" variant="bodySm">
+                  {`Showing ${pageStart + 1} to ${pageEnd} of ${diffs.length}`}
+                </Text>
+                <Pagination
+                  hasPrevious={page > 0}
+                  onPrevious={() => setPage((p) => Math.max(0, p - 1))}
+                  hasNext={page < totalPages - 1}
+                  onNext={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                  label={`Page ${page + 1} of ${totalPages}`}
+                />
+              </InlineStack>
             )}
 
             <Form method="post">
