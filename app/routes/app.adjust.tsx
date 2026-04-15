@@ -69,15 +69,20 @@ export default function AdjustPage() {
   const [rounding, setRounding] = useState<RoundingRule>("none");
 
   return (
-    <Page title="Quick price adjust" backAction={{ url: "/app" }}>
+    <Page
+      title="Quick adjust"
+      subtitle="Move every price by a percentage or fixed amount, no CSV required"
+      backAction={{ url: "/app" }}
+    >
       <BlockStack gap="400">
         {actionData?.error && <Banner tone="critical" title={actionData.error} />}
         <Card>
           <BlockStack gap="400">
-            <Text as="h2" variant="headingMd">Adjust prices across all variants</Text>
+            <Text as="h2" variant="headingMd">Adjust every variant at once</Text>
             <Text as="p" variant="bodyMd" tone="subdued">
-              Set a percentage or fixed amount change, optionally apply a rounding rule, and preview before writing
-              anything to your store.
+              Great for flash sales, seasonal bumps, or rolling back a previous sale. Pick a percent or
+              fixed amount, optionally snap to a charm ending, and you will see every single change in
+              the preview before anything gets written to your store.
             </Text>
 
             <Form method="post">
@@ -113,12 +118,12 @@ export default function AdjustPage() {
                 />
                 <Select
                   label="Rounding rule"
+                  helpText="Optional. Rounds each new price to the nearest ending you pick."
                   options={[
-                    { label: "None (keep exact)", value: "none" },
-                    { label: "End in .99", value: "end_99" },
+                    { label: "None (keep exact cents)", value: "none" },
+                    { label: "End in .99 (charm pricing)", value: "end_99" },
                     { label: "End in .95", value: "end_95" },
-                    { label: "Round to whole dollar", value: "end_00" },
-                    { label: "Nearest dollar", value: "nearest_dollar" },
+                    { label: "Whole dollar", value: "end_00" },
                   ]}
                   value={rounding}
                   onChange={(v) => setRounding(v as RoundingRule)}

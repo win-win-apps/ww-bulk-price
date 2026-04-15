@@ -2,6 +2,9 @@ import Papa from "papaparse";
 import type { VariantRow } from "./shopify-queries.server";
 
 // Columns for the exported CSV
+// Note: cost is intentionally excluded. We fetch it for display/context but
+// do not support writing it in v1, so shipping it as an editable column would
+// silently drop merchant edits. Coming in v1.1.
 export const CSV_COLUMNS = [
   "variant_id",
   "product_handle",
@@ -13,8 +16,6 @@ export const CSV_COLUMNS = [
   "new_price",
   "current_compare_at_price",
   "new_compare_at_price",
-  "current_cost",
-  "new_cost",
 ] as const;
 
 export type CsvRow = Record<(typeof CSV_COLUMNS)[number], string>;
@@ -31,8 +32,6 @@ export function variantsToCsvRows(variants: VariantRow[]): CsvRow[] {
     new_price: v.price, // Pre-fill with current so merchants can edit in place
     current_compare_at_price: v.compareAtPrice ?? "",
     new_compare_at_price: v.compareAtPrice ?? "",
-    current_cost: v.cost ?? "",
-    new_cost: v.cost ?? "",
   }));
 }
 
@@ -51,9 +50,11 @@ export type ParsedCsvRow = {
   current_price?: string;
   new_price?: string;
   current_compare_at_price?: string;
+  // new_compare_at_price is a 3-state value:
+  //   undefined = column was not present in the CSV, keep current
+  //   "" (empty string) = column present but cell blank, clear compare_at
+  //   non-empty string = set compare_at to that value
   new_compare_at_price?: string;
-  current_cost?: string;
-  new_cost?: string;
 };
 
 export type ParseResult = {
@@ -76,18 +77,26 @@ export function parseCsv(text: string): ParseResult {
     errors.push(`CSV is missing required column: ${requiredCol}`);
     return { rows: [], errors };
   }
+  // Track which headers were actually present so we can distinguish
+  // "column missing" (undefined) from "cell blank" ("") at the row level.
+  const headerSet = new Set(parsed.meta.fields ?? []);
+  const has = (col: string) => headerSet.has(col);
+  const pick = (r: Record<string, string>, col: string): string | undefined => {
+    if (!has(col)) return undefined;
+    const v = r[col];
+    return typeof v === "string" ? v.trim() : "";
+  };
+
   const rows: ParsedCsvRow[] = [];
   for (const r of parsed.data) {
     const variantId = (r["variant_id"] || "").trim();
     if (!variantId) continue;
     rows.push({
       variant_id: variantId,
-      current_price: r["current_price"]?.trim(),
-      new_price: r["new_price"]?.trim(),
-      current_compare_at_price: r["current_compare_at_price"]?.trim(),
-      new_compare_at_price: r["new_compare_at_price"]?.trim(),
-      current_cost: r["current_cost"]?.trim(),
-      new_cost: r["new_cost"]?.trim(),
+      current_price: pick(r, "current_price"),
+      new_price: pick(r, "new_price"),
+      current_compare_at_price: pick(r, "current_compare_at_price"),
+      new_compare_at_price: pick(r, "new_compare_at_price"),
     });
   }
   return { rows, errors };
@@ -119,10 +128,21 @@ export function computeDiff(parsedRows: ParsedCsvRow[], current: VariantRow[]): 
       errors.push(`Unknown variant: ${r.variant_id}`);
       continue;
     }
-    const newPrice = r.new_price || cur.price;
-    const newCompare = r.new_compare_at_price !== undefined && r.new_compare_at_price !== ""
-      ? r.new_compare_at_price
-      : cur.compareAtPrice;
+    // new_price: if column missing or cell blank, keep current. No way to clear a price.
+    const newPrice = r.new_price && r.new_price !== "" ? r.new_price : cur.price;
+
+    // new_compare_at_price: 3-state
+    //   undefined -> column missing, keep current compare_at
+    //   "" -> column present but blank, CLEAR compare_at (set to null on shopify)
+    //   value -> set to value
+    let newCompare: string | null;
+    if (r.new_compare_at_price === undefined) {
+      newCompare = cur.compareAtPrice;
+    } else if (r.new_compare_at_price === "") {
+      newCompare = null;
+    } else {
+      newCompare = r.new_compare_at_price;
+    }
 
     // Validate numeric
     const newPriceNum = Number(newPrice);
@@ -130,7 +150,7 @@ export function computeDiff(parsedRows: ParsedCsvRow[], current: VariantRow[]): 
       errors.push(`Invalid price for ${r.variant_id}: ${newPrice}`);
       continue;
     }
-    if (newCompare !== null && newCompare !== "" && newCompare !== undefined) {
+    if (newCompare !== null && newCompare !== "") {
       const n = Number(newCompare);
       if (Number.isNaN(n) || n < 0) {
         errors.push(`Invalid compare-at price for ${r.variant_id}: ${newCompare}`);
@@ -147,8 +167,10 @@ export function computeDiff(parsedRows: ParsedCsvRow[], current: VariantRow[]): 
       pctChange = ((newPriceNum - curNum) / curNum) * 100;
     }
     const flags: string[] = [];
-    if (pctChange !== null && pctChange <= -50) flags.push("big_drop");
-    if (pctChange !== null && pctChange >= 200) flags.push("big_increase");
+    // Merchant-sensible: 25% drop is a real sale worth noticing, 100%+ increase
+    // usually means a decimal typo (e.g. 19.99 -> 199.9).
+    if (pctChange !== null && pctChange <= -25) flags.push("big_drop");
+    if (pctChange !== null && pctChange >= 100) flags.push("big_increase");
 
     if (!priceChanged && !compareChanged) continue; // Unchanged rows are silently dropped
 
@@ -161,10 +183,7 @@ export function computeDiff(parsedRows: ParsedCsvRow[], current: VariantRow[]): 
       before: { price: cur.price, compareAtPrice: cur.compareAtPrice },
       after: {
         price: String(newPrice),
-        compareAtPrice:
-          newCompare === "" || newCompare === undefined || newCompare === null
-            ? null
-            : String(newCompare),
+        compareAtPrice: newCompare === null || newCompare === "" ? null : String(newCompare),
       },
       priceChanged,
       compareChanged,

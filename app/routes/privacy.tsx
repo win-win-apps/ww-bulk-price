@@ -6,7 +6,7 @@ export const loader = async (_: LoaderFunctionArgs) => {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Privacy Policy — WW Badges</title>
+  <title>Privacy Policy — Bulk Price: CSV Editor</title>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 800px; margin: 60px auto; padding: 0 24px; color: #1a1a1a; line-height: 1.7; }
     h1 { font-size: 2rem; margin-bottom: 4px; }
@@ -17,43 +17,49 @@ export const loader = async (_: LoaderFunctionArgs) => {
 </head>
 <body>
   <h1>Privacy Policy</h1>
-  <p class="subtitle">WW Badges — Win-Win Apps &nbsp;|&nbsp; Last updated: April 3, 2026</p>
+  <p class="subtitle">Bulk Price: CSV Editor — Win-Win Apps &nbsp;|&nbsp; Last updated: April 15, 2026</p>
 
-  <p>Win-Win Apps ("we", "our", or "us") operates the WW Badges Shopify application. This page informs you of our policies regarding the collection, use, and disclosure of personal data when you use our app.</p>
+  <p>Win-Win Apps ("we", "our", or "us") operates the Bulk Price: CSV Editor Shopify application ("the app"). This page explains what data the app collects, how it is used, and how it is deleted.</p>
 
   <h2>1. Information We Collect</h2>
-  <p>When you install WW Badges, we collect and store the following data to operate the app:</p>
+  <p>When you install Bulk Price: CSV Editor, we collect and store only what is required to run the app:</p>
   <ul>
-    <li><strong>Shopify store URL</strong> — to identify your store and associate your badge configurations</li>
-    <li><strong>Shopify access token</strong> — to sync badge data to your store's metafields and read product/theme information</li>
-    <li><strong>Badge configurations</strong> — the badge designs, targeting rules, and settings you create within the app</li>
+    <li><strong>Shopify store URL</strong> — to identify your store.</li>
+    <li><strong>Shopify access token</strong> — to read and update your product variant prices on your behalf.</li>
+    <li><strong>Price snapshots</strong> — for every apply run, we record the variant prices immediately before the update so you can undo the run within 30 days. These snapshots contain only variant IDs and price values, never customer data.</li>
+    <li><strong>Apply run history</strong> — the timestamp, source (CSV or quick adjust), and success/failure counts of each apply run, used to power the History tab.</li>
   </ul>
-  <p>We do not collect or store any personal information about your customers (shoppers).</p>
+  <p>We do not collect, process, or store any personal information about your customers (shoppers). The app never touches the customer object.</p>
 
   <h2>2. How We Use Your Information</h2>
   <ul>
-    <li>To display your configured badges on your storefront via Shopify metafields and theme app extensions</li>
-    <li>To store your badge settings so they persist between sessions</li>
-    <li>To authenticate API requests to Shopify on your behalf</li>
+    <li>To read your product variants so you can export a CSV of current prices.</li>
+    <li>To write updated prices back to your store via the Shopify Admin API when you approve an apply run.</li>
+    <li>To store snapshots so you can undo an apply run within 30 days.</li>
+    <li>To render the History tab inside the app.</li>
   </ul>
-  <p>We do not sell, trade, or otherwise transfer your information to outside parties.</p>
+  <p>We never sell, trade, or transfer your information to third parties.</p>
 
   <h2>3. Data Storage</h2>
-  <p>Badge configurations and session data are stored in a secure database hosted on our production servers. Access tokens are encrypted at rest. We retain your data for the duration of your app installation.</p>
+  <p>Sessions, price snapshots, and apply run history are stored in a secure Postgres database. Access tokens are encrypted at rest. We retain your data while the app is installed.</p>
 
   <h2>4. Third-Party Services</h2>
-  <p>WW Badges uses the following third-party services:</p>
   <ul>
-    <li><strong>Shopify API</strong> — to read product data, set metafields, and manage theme extensions on your store. Shopify's privacy policy is available at <a href="https://www.shopify.com/legal/privacy" target="_blank">shopify.com/legal/privacy</a>.</li>
-    <li><strong>Fly.io</strong> — our application hosting provider. Data is processed in accordance with Fly.io's data processing terms.</li>
+    <li><strong>Shopify API</strong> — to read product variants and write updated prices. See <a href="https://www.shopify.com/legal/privacy" target="_blank">shopify.com/legal/privacy</a>.</li>
+    <li><strong>Fly.io</strong> — application hosting provider.</li>
   </ul>
 
-  <h2>5. Data Deletion</h2>
-  <p>When you uninstall WW Badges, we receive a mandatory app/uninstalled webhook from Shopify. Upon receiving this webhook, we permanently delete all data associated with your store, including badge configurations and access tokens.</p>
-  <p>To request manual data deletion, contact us at <a href="mailto:omar@wwapps.io">omar@wwapps.io</a>.</p>
+  <h2>5. Data Deletion &amp; GDPR</h2>
+  <p>We implement the three mandatory Shopify compliance webhooks:</p>
+  <ul>
+    <li><strong>customers/data_request</strong> — Bulk Price: CSV Editor stores no customer-level data, so this webhook is acknowledged with an empty response.</li>
+    <li><strong>customers/redact</strong> — Same as above; no customer data to erase.</li>
+    <li><strong>shop/redact</strong> — Sent 48 hours after uninstall. On receipt we permanently delete all sessions, price snapshots, and apply run history for the shop.</li>
+  </ul>
+  <p>To request manual data deletion, email <a href="mailto:omar@wwapps.io">omar@wwapps.io</a>.</p>
 
   <h2>6. Security</h2>
-  <p>We implement industry-standard security measures including encrypted data storage, HTTPS-only communication, and access controls.</p>
+  <p>We use encrypted data storage, HTTPS-only communication, and least-privilege access controls. The app only requests the Shopify scopes it needs: <code>read_products</code>, <code>write_products</code>, <code>read_inventory</code>, <code>write_inventory</code>.</p>
 
   <h2>7. Changes to This Policy</h2>
   <p>We may update this Privacy Policy from time to time. The "Last updated" date at the top reflects the most recent revision.</p>

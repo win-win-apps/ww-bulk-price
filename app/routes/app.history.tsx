@@ -113,14 +113,28 @@ export default function HistoryPage() {
   ]);
 
   return (
-    <Page title="History" backAction={{ url: "/app" }}>
+    <Page
+      title="History"
+      subtitle="Every apply run from the last 30 days. Hit Undo on any row to restore the prices that were live before that run."
+      backAction={{ url: "/app" }}
+    >
       <BlockStack gap="400">
         {ran && <Banner tone="success" title="Changes applied" />}
         {undone && <Banner tone="success" title="Changes reverted" />}
         {actionData?.error && <Banner tone="critical" title={actionData.error} />}
         <Card>
           {runs.length === 0 ? (
-            <Text as="p" tone="subdued">No runs yet.</Text>
+            <BlockStack gap="200">
+              <Text as="p" variant="bodyMd" fontWeight="semibold">No runs yet</Text>
+              <Text as="p" variant="bodyMd" tone="subdued">
+                Once you apply a CSV or a quick adjust, the run will show up here with a one click Undo
+                button. Snapshots are kept for 30 days.
+              </Text>
+              <InlineStack gap="200">
+                <Button url="/app/upload" variant="primary">Upload CSV</Button>
+                <Button url="/app/adjust">Quick adjust</Button>
+              </InlineStack>
+            </BlockStack>
           ) : (
             <DataTable
               columnContentTypes={["text", "text", "numeric", "numeric", "numeric", "text", "text"]}

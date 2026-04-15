@@ -15,15 +15,13 @@ import {
 import { authenticate, prisma } from "../shopify.server";
 import { getStagedDiffs, clearStagedDiffs } from "../utils/staging.server";
 import { applyDiffs, writeSnapshot } from "../utils/apply.server";
-import { FREE_PLAN_PRODUCT_CAP } from "../utils/constants";
-import { getBillingState } from "../utils/billing.server";
+import { MAX_VARIANTS_PER_APPLY } from "../utils/constants";
 
 export const loader = async ({ params, request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const id = params.id;
   if (!id) throw new Response("Missing staging id", { status: 400 });
   const staged = getStagedDiffs(id, session.shop);
-  const billing = await getBillingState(session.shop);
   if (!staged) {
     return json({
       expired: true as const,
@@ -32,11 +30,10 @@ export const loader = async ({ params, request }: LoaderFunctionArgs) => {
       fileName: "",
       source: "csv" as const,
       overLimit: false,
-      freeCap: FREE_PLAN_PRODUCT_CAP,
-      isPaid: billing.isPaid,
+      maxPerApply: MAX_VARIANTS_PER_APPLY,
     });
   }
-  const overLimit = !billing.isPaid && staged.diffs.length > FREE_PLAN_PRODUCT_CAP;
+  const overLimit = staged.diffs.length > MAX_VARIANTS_PER_APPLY;
   return json({
     expired: false as const,
     id,
@@ -44,8 +41,7 @@ export const loader = async ({ params, request }: LoaderFunctionArgs) => {
     fileName: staged.fileName,
     source: staged.source,
     overLimit,
-    freeCap: FREE_PLAN_PRODUCT_CAP,
-    isPaid: billing.isPaid,
+    maxPerApply: MAX_VARIANTS_PER_APPLY,
   });
 };
 
@@ -53,11 +49,10 @@ export const action = async ({ params, request }: ActionFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
   const id = params.id!;
   const staged = getStagedDiffs(id, session.shop);
-  if (!staged) return json({ error: "Session expired, re-upload your CSV." }, { status: 400 });
+  if (!staged) return json({ error: "This preview expired. Please re-upload your CSV or run the quick adjust again." }, { status: 400 });
 
-  const billing = await getBillingState(session.shop);
-  if (!billing.isPaid && staged.diffs.length > FREE_PLAN_PRODUCT_CAP) {
-    return json({ error: `Free plan allows ${FREE_PLAN_PRODUCT_CAP} variants per apply. Upgrade to remove the limit.` });
+  if (staged.diffs.length > MAX_VARIANTS_PER_APPLY) {
+    return json({ error: `This run would touch ${staged.diffs.length} variants. Maximum per run is ${MAX_VARIANTS_PER_APPLY}. Split your CSV and try again.` });
   }
 
   const label = `${staged.source === "csv" ? "CSV apply" : "Quick adjust"} ${new Date().toLocaleString()}`;
@@ -79,10 +74,17 @@ export const action = async ({ params, request }: ActionFunctionArgs) => {
 
   const result = await applyDiffs(admin, staged.diffs);
 
+  // Status: completed = every row ok. partial = some ok + some failed. failed = nothing ok.
+  const finalStatus =
+    result.failed === 0
+      ? "completed"
+      : result.success === 0
+      ? "failed"
+      : "partial";
   await prisma.applyRun.update({
     where: { id: run.id },
     data: {
-      status: result.failed === 0 ? "completed" : result.success === 0 ? "failed" : "completed",
+      status: finalStatus,
       successRows: result.success,
       failedRows: result.failed,
       errors: result.errors.length > 0 ? JSON.stringify(result.errors.slice(0, 100)) : null,
@@ -102,10 +104,19 @@ export default function PreviewPage() {
 
   if ("expired" in data && data.expired) {
     return (
-      <Page title="Preview not found">
-        <Banner tone="warning" title="Session expired">
-          We could not find this upload. Please re-upload your CSV.
-        </Banner>
+      <Page title="Preview not found" backAction={{ url: "/app" }}>
+        <BlockStack gap="400">
+          <Banner tone="warning" title="This preview expired">
+            <Text as="p">
+              Previews are held in memory for 30 minutes. Nothing was written to your store. Head
+              back to Upload CSV or Quick adjust to start again.
+            </Text>
+          </Banner>
+          <InlineStack gap="200">
+            <Button url="/app/upload" variant="primary">Back to upload CSV</Button>
+            <Button url="/app/adjust">Back to quick adjust</Button>
+          </InlineStack>
+        </BlockStack>
       </Page>
     );
   }
@@ -115,8 +126,14 @@ export default function PreviewPage() {
   const flagged = diffs.filter((d) => d.flags.length > 0).length;
 
   const rows: Array<Array<React.ReactNode>> = diffs.slice(0, 500).map((d) => {
-    const before = `${d.before.price}${d.before.compareAtPrice ? ` (was ${d.before.compareAtPrice})` : ""}`;
-    const after = `${d.after.price}${d.after.compareAtPrice ? ` (was ${d.after.compareAtPrice})` : ""}`;
+    const beforeCompare = d.before.compareAtPrice ? ` (compare at ${d.before.compareAtPrice})` : "";
+    const afterCompare = d.after.compareAtPrice
+      ? ` (compare at ${d.after.compareAtPrice})`
+      : d.before.compareAtPrice
+      ? " (compare at cleared)"
+      : "";
+    const before = `${d.before.price}${beforeCompare}`;
+    const after = `${d.after.price}${afterCompare}`;
     const pct = d.pctChange == null ? "-" : `${d.pctChange > 0 ? "+" : ""}${d.pctChange.toFixed(1)}%`;
     const flag: React.ReactNode = d.flags.includes("big_drop") ? (
       <Badge tone="critical">big drop</Badge>
@@ -128,16 +145,20 @@ export default function PreviewPage() {
     return [d.productTitle || "-", d.variantTitle || "-", before, after, pct, flag];
   });
 
+  const backUrl = data.source === "adjustment" ? "/app/adjust" : "/app/upload";
   return (
     <Page
       title={`Preview: ${changed} change${changed === 1 ? "" : "s"}`}
       subtitle={`${data.fileName || data.source}`}
-      backAction={{ url: "/app/upload" }}
+      backAction={{ url: backUrl }}
     >
       <BlockStack gap="400">
         {data.overLimit && (
-          <Banner tone="warning" title={`Over the free-plan limit (${data.freeCap})`}>
-            <Text as="p">Upgrade to Pro to apply more than {data.freeCap} variants per run.</Text>
+          <Banner tone="warning" title={`Over the per-run limit (${data.maxPerApply})`}>
+            <Text as="p">
+              This run would touch {diffs.length} variants. To keep things safe we cap any single
+              apply at {data.maxPerApply}. Split your CSV into smaller chunks and come back.
+            </Text>
           </Banner>
         )}
         {actionData?.error && <Banner tone="critical" title={actionData.error} />}
@@ -170,7 +191,7 @@ export default function PreviewPage() {
                 <Button submit variant="primary" loading={applying} disabled={data.overLimit}>
                   {`Apply ${changed} change${changed === 1 ? "" : "s"}`}
                 </Button>
-                <Button url="/app/upload">Cancel</Button>
+                <Button url={backUrl}>Cancel</Button>
               </InlineStack>
             </Form>
           </BlockStack>

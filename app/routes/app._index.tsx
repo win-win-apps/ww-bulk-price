@@ -30,23 +30,24 @@ export default function Dashboard() {
   const { recent } = useLoaderData<typeof loader>();
 
   return (
-    <Page title="Bulk Price Editor" subtitle="Edit product prices in bulk via CSV">
+    <Page title="Bulk Price: CSV Editor" subtitle="Edit thousands of prices in minutes, with a preview and a 30 day undo">
       <BlockStack gap="500">
-        <Banner tone="info" title="How it works">
+        <Banner tone="info" title="Two ways to edit, one safety net">
           <Text as="p" variant="bodyMd">
-            Export your products to a CSV, edit prices in Excel or Google Sheets, then upload to preview and apply.
-            Every apply saves a snapshot so you can undo within 30 days.
+            Export a CSV and edit in Excel or Sheets, or skip the CSV and apply a percentage or fixed
+            amount to everything at once. Every run previews first and saves a snapshot so you can
+            undo within 30 days. Free, no per-run fees, no seat limits.
           </Text>
         </Banner>
 
         <Card>
           <BlockStack gap="400">
             <Text as="h2" variant="headingMd">
-              1. export your current prices
+              1. Export your current prices
             </Text>
             <Text as="p" variant="bodyMd" tone="subdued">
-              Download a CSV with every variant, current price, compare-at price and cost. Edit only the "new_*"
-              columns, then come back to upload.
+              Download a CSV with every variant, current price, and compare-at price. Edit only the
+              "new_*" columns in Excel or Google Sheets, then come back to upload.
             </Text>
             <InlineStack gap="200">
               <Link to="/app/export">
@@ -59,10 +60,11 @@ export default function Dashboard() {
         <Card>
           <BlockStack gap="400">
             <Text as="h2" variant="headingMd">
-              2. upload edited CSV
+              2. Upload your edited CSV
             </Text>
             <Text as="p" variant="bodyMd" tone="subdued">
-              Upload a CSV and we'll show you every change before anything is written to your store.
+              We'll compare it against your live prices and show every single change before writing
+              anything. Flagged rows surface big drops and typos so nothing surprises you.
             </Text>
             <InlineStack gap="200">
               <Link to="/app/upload">
@@ -75,11 +77,12 @@ export default function Dashboard() {
         <Card>
           <BlockStack gap="400">
             <Text as="h2" variant="headingMd">
-              Or do a quick adjustment
+              Shortcut: quick adjust without a CSV
             </Text>
             <Text as="p" variant="bodyMd" tone="subdued">
-              Skip the CSV entirely and apply a percentage or fixed amount change to all products, with optional
-              price rounding rules.
+              Running a 15% sale? bumping everything by $2? Pick a percentage or fixed amount and
+              optionally round to .99 or .95 charm endings. Still previews before writing, still
+              undoable.
             </Text>
             <InlineStack gap="200">
               <Link to="/app/adjust">
