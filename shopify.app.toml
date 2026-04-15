@@ -1,15 +1,15 @@
-# ww-bulk-price
-# NOTE: client_id must be set by Shane via `shopify app config link` to create
-# a new partner app for Bulk Price Editor. This placeholder is intentional.
+# Bulk Price: CSV Editor by Win-Win Apps
+# Partner app created 2026-04-15 via Dev Dashboard
 
-client_id = ""
-name = "Bulk Price Editor by Win-Win Apps"
-handle = "ww-bulk-price"
-application_url = "https://ww-bulk-price.fly.dev"
+client_id = "279eeda1422d9930dbb5845154fd712e"
+name = "Bulk Price: CSV Editor"
+handle = "bulk-price-csv-editor-1"
+application_url = "https://bulk-price-csv-editor.fly.dev"
 embedded = true
 
 [build]
 automatically_update_urls_on_dev = true
+include_config_on_deploy = true
 
 [webhooks]
 api_version = "2025-01"
@@ -31,9 +31,9 @@ scopes = "read_products,write_products,read_inventory,write_inventory"
 
 [auth]
 redirect_urls = [
-  "https://ww-bulk-price.fly.dev/auth/callback",
-  "https://ww-bulk-price.fly.dev/auth/shopify/callback",
-  "https://ww-bulk-price.fly.dev/api/auth"
+  "https://bulk-price-csv-editor.fly.dev/auth/callback",
+  "https://bulk-price-csv-editor.fly.dev/auth/shopify/callback",
+  "https://bulk-price-csv-editor.fly.dev/api/auth"
 ]
 
 [pos]
