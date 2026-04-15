@@ -390,10 +390,11 @@ export default function AdjustPage() {
     { field: "product_collection", operator: "is", value: "" },
   ]);
 
-  // Re-run the preview whenever the merchant enters Step 4 so it always
-  // reflects the latest rule and scope.
+  // Re-run the preview whenever the merchant enters Step 3 or Step 4. Step 3
+  // uses it only to grab one real matched variant as the storefront example
+  // (with its thumbnail), step 4 uses it to render the full diff table.
   useEffect(() => {
-    if (currentStep !== 4) return;
+    if (currentStep !== 3 && currentStep !== 4) return;
     const t = setTimeout(() => computePreview(), 0);
     return () => clearTimeout(t);
   }, [currentStep, computePreview]);
@@ -518,10 +519,44 @@ export default function AdjustPage() {
     setConditions((prev) => prev.filter((_, i) => i !== idx));
   }, []);
 
-  // Live preview: compute what one sample variant would look like after the rule
+  // Live preview: compute what one sample variant would look like after the
+  // rule. Prefers a real variant from the merchant's current scope (pulled
+  // from the previewFetcher results), and falls back to the generic store
+  // sample only if no scoped match is available yet.
   const preview = useMemo(() => {
-    if (!data.sampleVariant) return null;
-    const base = Number(data.sampleVariant.price);
+    // Prefer a real matched variant from the current scope so the merchant
+    // sees a product they actually selected, with its own image.
+    const scoped = previewPayload && previewPayload.diffs && previewPayload.diffs[0]
+      ? previewPayload.diffs[0]
+      : null;
+
+    type SampleSource = {
+      title: string;
+      price: string;
+      compareAtPrice: string | null;
+      imageUrl: string | null;
+    };
+    let sample: SampleSource | null = null;
+    if (scoped) {
+      const productTitle = scoped.productTitle || "Selected product";
+      const variantTitle = scoped.variantTitle && scoped.variantTitle !== "Default Title" ? ` (${scoped.variantTitle})` : "";
+      sample = {
+        title: `${productTitle}${variantTitle}`,
+        price: scoped.before.price,
+        compareAtPrice: scoped.before.compareAtPrice,
+        imageUrl: scoped.imageUrl ?? null,
+      };
+    } else if (data.sampleVariant) {
+      sample = {
+        title: data.sampleVariant.title,
+        price: data.sampleVariant.price,
+        compareAtPrice: data.sampleVariant.compareAtPrice,
+        imageUrl: null,
+      };
+    }
+    if (!sample) return null;
+
+    const base = Number(sample.price);
     if (Number.isNaN(base)) return null;
     const n = Number(amount);
     if (Number.isNaN(n)) return null;
@@ -550,16 +585,17 @@ export default function AdjustPage() {
       ruleKind === "sale" ? base.toFixed(2) :
       compareAt === "sale" ? base.toFixed(2) :
       compareAt === "clear" ? null :
-      data.sampleVariant.compareAtPrice;
+      sample.compareAtPrice;
     const fmt = (v: number) => `$${v.toFixed(2)}`;
     return {
-      title: data.sampleVariant.title,
+      title: sample.title,
+      imageUrl: sample.imageUrl,
       beforePrice: fmt(base),
-      beforeCompare: data.sampleVariant.compareAtPrice ? `$${Number(data.sampleVariant.compareAtPrice).toFixed(2)}` : null,
+      beforeCompare: sample.compareAtPrice ? `$${Number(sample.compareAtPrice).toFixed(2)}` : null,
       afterPrice: fmt(after),
       afterCompare: compareAfter ? `$${Number(compareAfter).toFixed(2)}` : null,
     };
-  }, [data.sampleVariant, amount, mode, rounding, compareAt, ruleKind]);
+  }, [previewPayload, data.sampleVariant, amount, mode, rounding, compareAt, ruleKind]);
 
   return (
     <Page
@@ -568,7 +604,7 @@ export default function AdjustPage() {
       backAction={{ url: "/app" }}
     >
       <Form method="post" ref={formRef}>
-        <div style={{ maxWidth: 500, margin: "0 auto" }}>
+        <div style={{ maxWidth: currentStep === 3 ? 820 : 500, margin: "0 auto", transition: "max-width 0.2s ease" }}>
         <BlockStack gap="500">
           {actionData?.error && <Banner tone="critical" title={actionData.error} />}
           {stepError && <Banner tone="critical" title={stepError} />}
@@ -608,6 +644,7 @@ export default function AdjustPage() {
 
           {/* Step 3: Price rule */}
           <div style={{ display: currentStep === 3 ? undefined : "none" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 280px", gap: 16, alignItems: "start" }}>
           <Card>
             <BlockStack gap="400">
               <InlineStack gap="200" blockAlign="center">
@@ -738,56 +775,51 @@ export default function AdjustPage() {
                 )}
               </BlockStack>
 
-              {/* Storefront example */}
-              {preview && (
-                <>
+            </BlockStack>
+          </Card>
+          <Card>
+            <BlockStack gap="300">
+              <Text as="h3" variant="headingSm">Storefront example</Text>
+              {preview ? (
+                <BlockStack gap="300">
+                  <InlineStack gap="200" blockAlign="center" wrap={false}>
+                    <Thumbnail src={preview.imageUrl} alt={preview.title} />
+                    <Text as="span" variant="bodyMd">{preview.title}</Text>
+                  </InlineStack>
                   <Divider />
-                  <BlockStack gap="200">
-                    <Text as="h3" variant="headingSm">Storefront example</Text>
-                    <Text as="p" variant="bodyMd" tone="subdued">Using "{preview.title}" as a sample.</Text>
-                    <InlineStack gap="400" align="start" wrap={false}>
-                      <Box
-                        padding="400"
-                        borderWidth="025"
-                        borderColor="border"
-                        borderRadius="200"
-                        minWidth="180px"
-                      >
-                        <BlockStack gap="100">
-                          <Text as="span" variant="bodySm" tone="subdued">Before</Text>
-                          <Text as="span" variant="headingMd">{preview.beforePrice}</Text>
-                          {preview.beforeCompare && (
-                            <Text as="span" variant="bodySm" tone="subdued">was {preview.beforeCompare}</Text>
-                          )}
-                        </BlockStack>
-                      </Box>
-                      <Box paddingBlockStart="400">
-                        <Text as="span" variant="headingLg" tone="subdued">→</Text>
-                      </Box>
-                      <Box
-                        padding="400"
-                        borderWidth="025"
-                        borderColor="border-success"
-                        borderRadius="200"
-                        minWidth="180px"
-                        background="bg-surface-success"
-                      >
-                        <BlockStack gap="100">
-                          <Text as="span" variant="bodySm" tone="subdued">After</Text>
-                          <Text as="span" variant="headingMd">{preview.afterPrice}</Text>
-                          {preview.afterCompare && (
-                            <Text as="span" variant="bodySm" tone="subdued">
-                              was <s>{preview.afterCompare}</s>
-                            </Text>
-                          )}
-                        </BlockStack>
-                      </Box>
-                    </InlineStack>
+                  <BlockStack gap="100">
+                    <Text as="span" variant="bodySm" tone="subdued">Before</Text>
+                    <Text as="span" variant="headingMd">{preview.beforePrice}</Text>
+                    {preview.beforeCompare && (
+                      <Text as="span" variant="bodySm" tone="subdued">was {preview.beforeCompare}</Text>
+                    )}
                   </BlockStack>
-                </>
+                  <Box
+                    padding="300"
+                    borderWidth="025"
+                    borderColor="border-success"
+                    borderRadius="200"
+                    background="bg-surface-success"
+                  >
+                    <BlockStack gap="100">
+                      <Text as="span" variant="bodySm" tone="subdued">After</Text>
+                      <Text as="span" variant="headingLg">{preview.afterPrice}</Text>
+                      {preview.afterCompare && (
+                        <Text as="span" variant="bodySm" tone="subdued">
+                          was <s>{preview.afterCompare}</s>
+                        </Text>
+                      )}
+                    </BlockStack>
+                  </Box>
+                </BlockStack>
+              ) : (
+                <Text as="p" variant="bodySm" tone="subdued">
+                  {previewLoading ? "Loading a sample from your selection..." : "No matching products yet. Go back and pick a scope."}
+                </Text>
               )}
             </BlockStack>
           </Card>
+          </div>
           </div>
 
           {/* Step 2: Scope */}
