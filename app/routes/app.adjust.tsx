@@ -594,7 +594,8 @@ export default function AdjustPage() {
                 <Text as="span" variant="headingMd" tone="subdued">Give this job a title</Text>
               </InlineStack>
               <TextField
-                label='eg "March 30% off sale on boots"'
+                label=""
+                labelHidden
                 value={title}
                 onChange={setTitle}
                 name="title"
