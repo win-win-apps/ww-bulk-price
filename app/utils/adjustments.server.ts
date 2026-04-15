@@ -23,9 +23,11 @@ export type RoundingRule = "none" | "end_99" | "end_95" | "end_00";
 export type CompareAtMode = "leave" | "sale" | "clear" | "percent" | "fixed";
 
 // Condition fields. Matches the dropdown in NA bulk price editor.
-// We skip "collection" for v1 because it needs an extra query. Everything else
-// reads straight off VariantRow so the match runs at zero API cost.
+// product_collection matches against the variant's product's collection ids,
+// which are loaded with the variants query. Everything else reads straight off
+// VariantRow so the match runs at zero extra API cost.
 export type ConditionField =
+  | "product_collection"
   | "product_title"
   | "product_type"
   | "vendor"
@@ -138,6 +140,13 @@ function numericOp(value: number | null, op: ConditionOperator, target: number):
 
 function evalCondition(v: VariantRow, c: Condition): boolean {
   switch (c.field) {
+    case "product_collection": {
+      // value is a collection id (gid://shopify/Collection/123)
+      const ids = v.collectionIds || [];
+      if (c.operator === "is") return ids.includes(c.value);
+      if (c.operator === "is_not") return !ids.includes(c.value);
+      return false;
+    }
     case "product_title": return textOp(v.productTitle, c.operator, c.value);
     case "product_type": return textOp(v.productType, c.operator, c.value);
     case "vendor": return textOp(v.vendor, c.operator, c.value);

@@ -29,6 +29,8 @@ export type VariantRow = {
   tags: string[];
   productStatus: string; // ACTIVE | DRAFT | ARCHIVED
   isGiftCard: boolean;
+  // Collection ids this variant's product belongs to. Capped at 50 per product.
+  collectionIds: string[];
   variantId: string;
   variantTitle: string;
   sku: string | null;
@@ -38,6 +40,12 @@ export type VariantRow = {
   inventoryItemId: string | null;
   inventoryQuantity: number | null;
   currencyCode: string;
+};
+
+export type CollectionRow = {
+  id: string;
+  title: string;
+  handle: string;
 };
 
 const PRODUCT_VARIANTS_PAGE_QUERY = `#graphql
@@ -51,7 +59,10 @@ const PRODUCT_VARIANTS_PAGE_QUERY = `#graphql
         price
         compareAtPrice
         inventoryQuantity
-        product { id title handle productType vendor tags status isGiftCard }
+        product {
+          id title handle productType vendor tags status isGiftCard
+          collections(first: 50) { nodes { id } }
+        }
         inventoryItem {
           id
           unitCost { amount }
@@ -79,7 +90,7 @@ export async function fetchAllVariants(admin: { graphql: GraphQLFn }): Promise<V
             price: string;
             compareAtPrice: string | null;
             inventoryQuantity: number | null;
-            product: { id: string; title: string; handle: string; productType: string; vendor: string; tags: string[]; status: string; isGiftCard: boolean };
+            product: { id: string; title: string; handle: string; productType: string; vendor: string; tags: string[]; status: string; isGiftCard: boolean; collections: { nodes: Array<{ id: string }> } };
             inventoryItem: { id: string; unitCost: { amount: string } | null } | null;
           }>;
         };
@@ -97,6 +108,9 @@ export async function fetchAllVariants(admin: { graphql: GraphQLFn }): Promise<V
         tags: Array.isArray(n.product.tags) ? n.product.tags : [],
         productStatus: n.product.status || "ACTIVE",
         isGiftCard: !!n.product.isGiftCard,
+        collectionIds: Array.isArray(n.product.collections?.nodes)
+          ? n.product.collections.nodes.map((c) => c.id)
+          : [],
         variantId: n.id,
         variantTitle: n.title,
         sku: n.sku,
@@ -110,6 +124,37 @@ export async function fetchAllVariants(admin: { graphql: GraphQLFn }): Promise<V
     }
     if (!data.productVariants.pageInfo.hasNextPage) break;
     cursor = data.productVariants.pageInfo.endCursor;
+  }
+  return out;
+}
+
+const COLLECTIONS_PAGE_QUERY = `#graphql
+  query collectionsPage($cursor: String) {
+    collections(first: 250, after: $cursor) {
+      pageInfo { hasNextPage endCursor }
+      nodes { id title handle }
+    }
+  }
+`;
+
+export async function fetchAllCollections(admin: { graphql: GraphQLFn }): Promise<CollectionRow[]> {
+  const out: CollectionRow[] = [];
+  let cursor: string | null = null;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const data = await withRetry(() =>
+      runGraphql<{
+        collections: {
+          pageInfo: { hasNextPage: boolean; endCursor: string | null };
+          nodes: Array<{ id: string; title: string; handle: string }>;
+        };
+      }>(admin, COLLECTIONS_PAGE_QUERY, { cursor })
+    );
+    for (const n of data.collections.nodes) {
+      out.push({ id: n.id, title: n.title, handle: n.handle });
+    }
+    if (!data.collections.pageInfo.hasNextPage) break;
+    cursor = data.collections.pageInfo.endCursor;
   }
   return out;
 }

@@ -24,7 +24,7 @@ import { ArrowLeftIcon, DeleteIcon, PlusIcon } from "@shopify/polaris-icons";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { authenticate } from "../shopify.server";
-import { fetchAllVariants, type VariantRow } from "../utils/shopify-queries.server";
+import { fetchAllVariants, fetchAllCollections, type CollectionRow, type VariantRow } from "../utils/shopify-queries.server";
 import {
   buildAdjustmentDiffs,
   describeAdjustment,
@@ -55,9 +55,12 @@ type LoaderData = {
   tags: string[];
   variantTitles: string[];
   productTitles: string[];
+  // Collections are id + title pairs because the value we match on is the id
+  // but we want to show the title in the UI.
+  collections: Array<{ id: string; title: string }>;
 };
 
-function collectFacets(variants: VariantRow[]): LoaderData {
+function collectFacets(variants: VariantRow[], collections: CollectionRow[]): LoaderData {
   const first = variants[0];
   const productTypes = new Set<string>();
   const vendors = new Set<string>();
@@ -88,13 +91,20 @@ function collectFacets(variants: VariantRow[]): LoaderData {
     // Cap product titles to keep payload bounded on large stores; merchants can
     // always switch to "contains" to hand-type for giant catalogs.
     productTitles: Array.from(productTitles).sort().slice(0, 500),
+    collections: collections
+      .slice()
+      .sort((a, b) => a.title.localeCompare(b.title))
+      .map((c) => ({ id: c.id, title: c.title })),
   };
 }
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin } = await authenticate.admin(request);
-  const variants = await fetchAllVariants(admin);
-  return json(collectFacets(variants));
+  const [variants, collections] = await Promise.all([
+    fetchAllVariants(admin),
+    fetchAllCollections(admin),
+  ]);
+  return json(collectFacets(variants, collections));
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -226,10 +236,15 @@ function defaultTitle(): string {
 type FieldDef = {
   label: string;
   operators: ConditionOperator[];
-  valueKind: "text" | "number" | "status" | "giftcard";
+  valueKind: "text" | "number" | "status" | "giftcard" | "collection";
 };
 
 const FIELD_DEFS: Record<ConditionField, FieldDef> = {
+  product_collection: {
+    label: "The product's collection",
+    operators: ["is", "is_not"],
+    valueKind: "collection",
+  },
   product_title: {
     label: "The product's title",
     operators: ["is", "is_not", "contains", "not_contains", "starts_with", "ends_with"],
@@ -365,7 +380,7 @@ export default function AdjustPage() {
   }, []);
   const [conjunction, setConjunction] = useState<Conjunction>("AND");
   const [conditions, setConditions] = useState<Condition[]>([
-    { field: "product_type", operator: "is", value: "" },
+    { field: "product_collection", operator: "is", value: "" },
   ]);
 
   // Resource picker handlers. Uses App Bridge shopify.resourcePicker which pops
@@ -419,7 +434,7 @@ export default function AdjustPage() {
 
   // Condition mutation helpers
   const addCondition = useCallback(() => {
-    setConditions((prev) => [...prev, { field: "product_type", operator: "is", value: "" }]);
+    setConditions((prev) => [...prev, { field: "product_collection", operator: "is", value: "" }]);
   }, []);
   const updateCondition = useCallback((idx: number, patch: Partial<Condition>) => {
     setConditions((prev) => prev.map((c, i) => {
@@ -837,6 +852,7 @@ export default function AdjustPage() {
                               tags: data.tags,
                               variantTitles: data.variantTitles,
                               productTitles: data.productTitles,
+                              collections: data.collections,
                             }}
                           />
                         ))}
@@ -936,6 +952,7 @@ type ConditionFacets = {
   tags: string[];
   variantTitles: string[];
   productTitles: string[];
+  collections: Array<{ id: string; title: string }>;
 };
 
 /**
@@ -988,7 +1005,20 @@ function ConditionRow({
     (condition.operator === "is" || condition.operator === "is_not");
 
   let valueControl: React.ReactNode;
-  if (def.valueKind === "status") {
+  if (def.valueKind === "collection") {
+    valueControl = (
+      <Select
+        label=""
+        labelHidden
+        options={[
+          { label: "Select collection", value: "" },
+          ...facets.collections.map((c) => ({ label: c.title, value: c.id })),
+        ]}
+        value={condition.value}
+        onChange={(v) => onChange({ value: v })}
+      />
+    );
+  } else if (def.valueKind === "status") {
     valueControl = (
       <Select
         label=""
