@@ -1,0 +1,417 @@
+diff --git a/Dockerfile b/Dockerfile
+index 07bc9cf..d66056d 100644
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -1,4 +1,4 @@
+-FROM node:18-alpine
++FROM node:22-alpine
+ RUN apk add --no-cache openssl
+ 
+ EXPOSE 3000
+diff --git a/FRESH.md b/FRESH.md
+new file mode 100644
+index 0000000..f1a7d52
+--- /dev/null
++++ b/FRESH.md
+@@ -0,0 +1,10 @@
++- prisma schema switch to postgres
++- set schema
++- docker compose file
++- run app locally via shopify and get SHOPIFY_APP_KEY etc.
++  - shopify toml and dev toml
++- create new fly app or copy and createfly.toml
++- set DATABASE_URL secret
++- decide redis or no?
++
++
+diff --git a/docker-compose.yml b/docker-compose.yml
+new file mode 100644
+index 0000000..eb12454
+--- /dev/null
++++ b/docker-compose.yml
+@@ -0,0 +1,13 @@
++services:
++  db:
++    image: postgres:17
++    environment:
++      - POSTGRES_USER=dev
++      - POSTGRES_PASSWORD=dev
++      - POSTGRES_DB=dev
++    ports:
++      - "5432:5432"
++  redis:
++    image: redis:7.4.1
++    ports:
++      - "6379:6379"
+diff --git a/fly.toml b/fly.toml
+new file mode 100644
+index 0000000..8567a15
+--- /dev/null
++++ b/fly.toml
+@@ -0,0 +1,24 @@
++app = 'win-win-badges'
++primary_region = 'yyz'
++
++[build]
++
++[env]
++  PORT = '3000'
++  SCOPES = 'write_themes,write_products,read_products,read_themes'
++  SHOPIFY_API_KEY = '84b07c3621ea9a86c72f5048460a04c7'
++  SHOPIFY_APP_URL = 'https://win-win-badges.fly.dev'
++
++[http_service]
++  internal_port = 3000
++  force_https = true
++  auto_stop_machines = false
++  auto_start_machines = true
++  min_machines_running = 1
++  processes = ['app']
++
++[[vm]]
++  memory = '1gb'
++  cpu_kind = 'shared'
++  cpus = 1
++
+diff --git a/prisma/migrations/20260401023024_init/migration.sql b/prisma/migrations/20260401023024_init/migration.sql
+new file mode 100644
+index 0000000..54a2458
+--- /dev/null
++++ b/prisma/migrations/20260401023024_init/migration.sql
+@@ -0,0 +1,28 @@
++-- CreateSchema
++CREATE SCHEMA IF NOT EXISTS "winwin_badge";
++
++-- CreateTable
++CREATE TABLE "winwin_badge"."Session" (
++    "id" TEXT NOT NULL,
++    "shop" TEXT NOT NULL,
++    "state" TEXT NOT NULL,
++    "isOnline" BOOLEAN NOT NULL DEFAULT false,
++    "scope" TEXT,
++    "expires" TIMESTAMP(3),
++    "accessToken" TEXT NOT NULL,
++    "userId" INTEGER,
++    "firstName" TEXT,
++    "lastName" TEXT,
++    "email" TEXT,
++    "accountOwner" BOOLEAN NOT NULL DEFAULT false,
++    "locale" TEXT,
++    "collaborator" BOOLEAN DEFAULT false,
++    "emailVerified" BOOLEAN DEFAULT false,
++    "refreshToken" TEXT,
++    "refreshTokenExpires" TIMESTAMP(3),
++
++    CONSTRAINT "Session_pkey" PRIMARY KEY ("id")
++);
++
++-- CreateIndex
++CREATE UNIQUE INDEX "Session_shop_key" ON "winwin_badge"."Session"("shop");
+diff --git a/prisma/migrations/20260403000000_init/migration.sql b/prisma/migrations/20260408120238_add_badge/migration.sql
+similarity index 60%
+rename from prisma/migrations/20260403000000_init/migration.sql
+rename to prisma/migrations/20260408120238_add_badge/migration.sql
+index 83349cb..9b0f5c4 100644
+--- a/prisma/migrations/20260403000000_init/migration.sql
++++ b/prisma/migrations/20260408120238_add_badge/migration.sql
+@@ -1,27 +1,6 @@
+ -- CreateTable
+-CREATE TABLE "Session" (
+-    "id" TEXT NOT NULL PRIMARY KEY,
+-    "shop" TEXT NOT NULL,
+-    "state" TEXT NOT NULL,
+-    "isOnline" BOOLEAN NOT NULL DEFAULT false,
+-    "scope" TEXT,
+-    "expires" DATETIME,
+-    "accessToken" TEXT NOT NULL,
+-    "userId" BIGINT,
+-    "firstName" TEXT,
+-    "lastName" TEXT,
+-    "email" TEXT,
+-    "accountOwner" BOOLEAN NOT NULL DEFAULT false,
+-    "locale" TEXT,
+-    "collaborator" BOOLEAN DEFAULT false,
+-    "emailVerified" BOOLEAN DEFAULT false,
+-    "refreshToken" TEXT,
+-    "refreshTokenExpires" DATETIME
+-);
+-
+--- CreateTable
+-CREATE TABLE "Badge" (
+-    "id" TEXT NOT NULL PRIMARY KEY,
++CREATE TABLE "winwin_badge"."Badge" (
++    "id" TEXT NOT NULL,
+     "shop" TEXT NOT NULL,
+     "name" TEXT NOT NULL DEFAULT 'Deco Badge',
+     "active" BOOLEAN NOT NULL DEFAULT true,
+@@ -37,11 +16,11 @@ CREATE TABLE "Badge" (
+     "text" TEXT NOT NULL DEFAULT 'SAVE {SAVE_PERCENT}%',
+     "fontFamily" TEXT NOT NULL DEFAULT 'Alata',
+     "textColor" TEXT NOT NULL DEFAULT '#ffffff',
+-    "width" REAL NOT NULL DEFAULT 20,
+-    "height" REAL NOT NULL DEFAULT 10,
++    "width" DOUBLE PRECISION NOT NULL DEFAULT 20,
++    "height" DOUBLE PRECISION NOT NULL DEFAULT 10,
+     "autoTextSize" BOOLEAN NOT NULL DEFAULT true,
+-    "textSizePct" REAL NOT NULL DEFAULT 60,
+-    "letterSpacing" REAL NOT NULL DEFAULT 2,
++    "textSizePct" DOUBLE PRECISION NOT NULL DEFAULT 60,
++    "letterSpacing" DOUBLE PRECISION NOT NULL DEFAULT 2,
+     "showDesktop" BOOLEAN NOT NULL DEFAULT true,
+     "showMobile" BOOLEAN NOT NULL DEFAULT true,
+     "hasBorder" BOOLEAN NOT NULL DEFAULT false,
+@@ -49,22 +28,24 @@ CREATE TABLE "Badge" (
+     "roundCorner" BOOLEAN NOT NULL DEFAULT false,
+     "productTarget" TEXT NOT NULL DEFAULT 'specific',
+     "productIds" TEXT NOT NULL DEFAULT '[]',
+-    "conditionPriceMin" REAL,
+-    "conditionPriceMax" REAL,
++    "conditionPriceMin" DOUBLE PRECISION,
++    "conditionPriceMax" DOUBLE PRECISION,
+     "conditionTitle" TEXT NOT NULL DEFAULT '',
+     "conditionCollections" TEXT NOT NULL DEFAULT '[]',
+     "conditionTags" TEXT NOT NULL DEFAULT '[]',
+     "conditionInventoryStatus" TEXT NOT NULL DEFAULT '[]',
+-    "conditionCompareAtMin" REAL,
+-    "conditionCompareAtMax" REAL,
++    "conditionCompareAtMin" DOUBLE PRECISION,
++    "conditionCompareAtMax" DOUBLE PRECISION,
+     "showOnProduct" BOOLEAN NOT NULL DEFAULT true,
+     "showOnCollection" BOOLEAN NOT NULL DEFAULT true,
+     "showOnHome" BOOLEAN NOT NULL DEFAULT true,
+     "showOnSearch" BOOLEAN NOT NULL DEFAULT true,
+     "showOnCart" BOOLEAN NOT NULL DEFAULT false,
+-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+-    "updatedAt" DATETIME NOT NULL
++    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
++    "updatedAt" TIMESTAMP(3) NOT NULL,
++
++    CONSTRAINT "Badge_pkey" PRIMARY KEY ("id")
+ );
+ 
+ -- CreateIndex
+-CREATE INDEX "Badge_shop_idx" ON "Badge"("shop");
++CREATE INDEX "Badge_shop_idx" ON "winwin_badge"."Badge"("shop");
+diff --git a/prisma/migrations/migration_lock.toml b/prisma/migrations/migration_lock.toml
+index 2a5a444..044d57c 100644
+--- a/prisma/migrations/migration_lock.toml
++++ b/prisma/migrations/migration_lock.toml
+@@ -1,3 +1,3 @@
+ # Please do not edit this file manually
+ # It should be added in your version-control system (e.g., Git)
+-provider = "sqlite"
++provider = "postgresql"
+diff --git a/prisma/schema.prisma b/prisma/schema.prisma
+index 13c363d..cec9b73 100644
+--- a/prisma/schema.prisma
++++ b/prisma/schema.prisma
+@@ -1,30 +1,40 @@
+-generator client {
+-  provider = "prisma-client-js"
+-}
+-
+-datasource db {
+-  provider = "sqlite"
+-  url      = "file:dev.sqlite"
++// This is your Prisma schema file, 
++// learn more about it in the docs: https://pris.ly/d/prisma-schema 
++    
++generator client { 
++  provider        = "prisma-client-js" 
++  previewFeatures = ["multiSchema"] 
++} 
++    
++// Note that some adapters may set a maximum length for the String type by default, please ensure your strings are long 
++// enough when changing adapters. 
++// See https://www.prisma.io/docs/orm/reference/prisma-schema-reference#string for more information 
++datasource db { 
++  provider = "postgresql" 
++  url      = env("DATABASE_URL") 
++  schemas  = ["winwin_badge"] 
+ }
+ 
+ model Session {
+-  id                  String    @id
+-  shop                String
+-  state               String
+-  isOnline            Boolean   @default(false)
+-  scope               String?
+-  expires             DateTime?
+-  accessToken         String
+-  userId              BigInt?
+-  firstName           String?
+-  lastName            String?
+-  email               String?
+-  accountOwner        Boolean   @default(false)
+-  locale              String?
+-  collaborator        Boolean?  @default(false)
+-  emailVerified       Boolean?  @default(false)
+-  refreshToken        String?
++  id            String    @id
++  shop          String    @unique
++  state         String
++  isOnline      Boolean   @default(false)
++  scope         String?
++  expires       DateTime?
++  accessToken   String
++  userId        Int?
++  firstName     String?
++  lastName      String?
++  email         String?
++  accountOwner  Boolean   @default(false)
++  locale        String?
++  collaborator  Boolean?  @default(false)
++  emailVerified Boolean?  @default(false)
++  refreshToken  String?
+   refreshTokenExpires DateTime?
++
++  @@schema("winwin_badge")
+ }
+ 
+ model Badge {
+@@ -92,4 +102,6 @@ model Badge {
+   updatedAt      DateTime @updatedAt
+ 
+   @@index([shop])
++  @@schema("winwin_badge")
+ }
++
+diff --git a/shopify.app.badges-claude-automated.toml b/shopify.app.badges-claude-automated.toml
+index be78f70..9ee3a0f 100644
+--- a/shopify.app.badges-claude-automated.toml
++++ b/shopify.app.badges-claude-automated.toml
+@@ -11,6 +11,16 @@ automatically_update_urls_on_dev = true
+ [webhooks]
+ api_version = "2026-07"
+ 
++  # Handled by: /app/routes/webhooks.app.uninstalled.tsx
++  [[webhooks.subscriptions]]
++  topics = ["app/uninstalled"]
++  uri = "/webhooks/app/uninstalled"
++
++  # Handled by: /app/routes/webhooks.app.scopes_update.tsx
++  [[webhooks.subscriptions]]
++  topics = ["app/scopes_update"]
++  uri = "/webhooks/app/scopes_update"
++
+ [access_scopes]
+ # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+ scopes = "read_products,read_themes,write_themes,write_products"
+diff --git a/shopify.app.badges-claude.toml b/shopify.app.badges-claude.toml
+index e9b1da7..58e3860 100644
+--- a/shopify.app.badges-claude.toml
++++ b/shopify.app.badges-claude.toml
+@@ -11,6 +11,16 @@ automatically_update_urls_on_dev = true
+ [webhooks]
+ api_version = "2026-07"
+ 
++  # Handled by: /app/routes/webhooks.app.uninstalled.tsx
++  [[webhooks.subscriptions]]
++  topics = ["app/uninstalled"]
++  uri = "/webhooks/app/uninstalled"
++
++  # Handled by: /app/routes/webhooks.app.scopes_update.tsx
++  [[webhooks.subscriptions]]
++  topics = ["app/scopes_update"]
++  uri = "/webhooks/app/scopes_update"
++
+ [access_scopes]
+ # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+ scopes = "read_products,read_themes,write_themes,write_products"
+diff --git a/shopify.app.badges-dev.toml b/shopify.app.badges-dev.toml
+deleted file mode 100644
+index c4f6ae4..0000000
+--- a/shopify.app.badges-dev.toml
++++ /dev/null
+@@ -1,20 +0,0 @@
+-# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+-
+-client_id = "a5e7fdcf6c92d7e2bda003def33ddc4c"
+-name = "Badges (Dev)"
+-application_url = "https://example.com"
+-embedded = true
+-
+-[build]
+-automatically_update_urls_on_dev = true
+-include_config_on_deploy = true
+-
+-[webhooks]
+-api_version = "2026-04"
+-
+-[access_scopes]
+-# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+-scopes = "read_products,read_themes,write_products"
+-
+-[auth]
+-redirect_urls = [ "https://example.com/api/auth" ]
+diff --git a/shopify.app.toml b/shopify.app.toml
+index 69c26a0..58e3860 100644
+--- a/shopify.app.toml
++++ b/shopify.app.toml
+@@ -1,52 +1,29 @@
+-# This file stores configurations for your Shopify app.
+-# Run `shopify app config link` to connect a Partner app; CLI updates URLs for dev.
++# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+ 
+-name = "Product Badges"
+-client_id = ""
+-application_url = "https://example.com"
++client_id = "b44dcf09bf682d29ac84b63b02a4216a"
++name = "Badges (Claude)"
++application_url = "https://localhost:3458"
+ embedded = true
+ 
+-[auth]
+-redirect_urls = [
+-  "https://example.com/auth/callback",
+-  "https://example.com/auth/shopify/callback",
+-]
+-
+-[access_scopes]
+-# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+-scopes = "write_products,read_products,read_themes"
++[build]
++automatically_update_urls_on_dev = true
+ 
+ [webhooks]
+-api_version = "2024-10"
++api_version = "2026-07"
+ 
+   # Handled by: /app/routes/webhooks.app.uninstalled.tsx
+   [[webhooks.subscriptions]]
+-  uri = "/webhooks/app/uninstalled"
+   topics = ["app/uninstalled"]
++  uri = "/webhooks/app/uninstalled"
+ 
+   # Handled by: /app/routes/webhooks.app.scopes_update.tsx
+   [[webhooks.subscriptions]]
+-  topics = [ "app/scopes_update" ]
++  topics = ["app/scopes_update"]
+   uri = "/webhooks/app/scopes_update"
+ 
+-  # Webhooks can have filters
+-  # Only receive webhooks for product updates with a product price >= 10.00
+-  # See: https://shopify.dev/docs/apps/build/webhooks/customize/filters
+-  # [[webhooks.subscriptions]]
+-  # topics = ["products/update"]
+-  # uri = "/webhooks/products/update"
+-  # filter = "variants.price:>=10.00"
+-
+-  # Mandatory compliance topic for public apps only
+-  # See: https://shopify.dev/docs/apps/build/privacy-law-compliance
+-  # [[webhooks.subscriptions]]
+-  # uri = "/webhooks/customers/data_request"
+-  # compliance_topics = ["customers/data_request"]
+-
+-  # [[webhooks.subscriptions]]
+-  # uri = "/webhooks/customers/redact"
+-  # compliance_topics = ["customers/redact"]
++[access_scopes]
++# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
++scopes = "read_products,read_themes,write_themes,write_products"
+ 
+-  # [[webhooks.subscriptions]]
+-  # uri = "/webhooks/shop/redact"
+-  # compliance_topics = ["shop/redact"]
++[auth]
++redirect_urls = [ "https://localhost:3458/auth/callback", "https://localhost:3458/auth/shopify/callback", "https://localhost:3458/api/auth" ]

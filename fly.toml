@@ -1,0 +1,24 @@
+app = 'win-win-badges'
+primary_region = 'yyz'
+
+[build]
+
+[env]
+  PORT = '3000'
+  SCOPES = 'write_themes,write_products,read_products,read_themes'
+  SHOPIFY_API_KEY = '84b07c3621ea9a86c72f5048460a04c7'
+  SHOPIFY_APP_URL = 'https://win-win-badges.fly.dev'
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ['app']
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1
+

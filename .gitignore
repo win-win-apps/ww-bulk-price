@@ -1,0 +1,12 @@
+node_modules
+.DS_Store
+build
+.cache
+public/build
+*.sqlite
+*.sqlite-journal
+*.db
+*.db-journal
+.env
+*.sqlite-wal
+*.sqlite-shm

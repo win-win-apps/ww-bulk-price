@@ -1,0 +1,66 @@
+// ww-bulk-price Prisma schema
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["multiSchema"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["winwin_bulk_price"]
+}
+
+model Session {
+  id                  String    @id
+  shop                String    @unique
+  state               String
+  isOnline            Boolean   @default(false)
+  scope               String?
+  expires             DateTime?
+  accessToken         String
+  userId              Int?
+  firstName           String?
+  lastName            String?
+  email               String?
+  accountOwner        Boolean   @default(false)
+  locale              String?
+  collaborator        Boolean?  @default(false)
+  emailVerified       Boolean?  @default(false)
+  refreshToken        String?
+  refreshTokenExpires DateTime?
+
+  @@schema("winwin_bulk_price")
+}
+
+// Snapshot of prices before an apply run, used for undo
+model PriceSnapshot {
+  id          String   @id @default(cuid())
+  shop        String
+  label       String   // e.g. "Apply 2026-04-15 03:22"
+  rowCount    Int      @default(0)
+  // JSON array of { variantId, price, compareAtPrice, cost }
+  beforeJson  String
+  createdAt   DateTime @default(now())
+  undone      Boolean  @default(false)
+
+  @@index([shop, createdAt])
+  @@schema("winwin_bulk_price")
+}
+
+// Run history for the app UI
+model ApplyRun {
+  id          String   @id @default(cuid())
+  shop        String
+  status      String   // running | completed | failed | undone
+  totalRows   Int      @default(0)
+  successRows Int      @default(0)
+  failedRows  Int      @default(0)
+  errors      String?  // JSON array of { variantId, message }
+  snapshotId  String?
+  source      String   @default("csv") // csv | adjustment
+  createdAt   DateTime @default(now())
+  completedAt DateTime?
+
+  @@index([shop, createdAt])
+  @@schema("winwin_bulk_price")
+}

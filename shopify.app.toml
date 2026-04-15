@@ -1,0 +1,40 @@
+# ww-bulk-price
+# NOTE: client_id must be set by Shane via `shopify app config link` to create
+# a new partner app for Bulk Price Editor. This placeholder is intentional.
+
+client_id = ""
+name = "Bulk Price Editor by Win-Win Apps"
+handle = "ww-bulk-price"
+application_url = "https://ww-bulk-price.fly.dev"
+embedded = true
+
+[build]
+automatically_update_urls_on_dev = true
+
+[webhooks]
+api_version = "2025-01"
+
+  [[webhooks.subscriptions]]
+  topics = ["app/uninstalled"]
+  uri = "/webhooks/app/uninstalled"
+
+  [[webhooks.subscriptions]]
+  topics = ["app/scopes_update"]
+  uri = "/webhooks/app/scopes_update"
+
+  [[webhooks.subscriptions]]
+  compliance_topics = ["customers/data_request", "customers/redact", "shop/redact"]
+  uri = "/webhooks/compliance"
+
+[access_scopes]
+scopes = "read_products,write_products,read_inventory,write_inventory"
+
+[auth]
+redirect_urls = [
+  "https://ww-bulk-price.fly.dev/auth/callback",
+  "https://ww-bulk-price.fly.dev/auth/shopify/callback",
+  "https://ww-bulk-price.fly.dev/api/auth"
+]
+
+[pos]
+embedded = false
