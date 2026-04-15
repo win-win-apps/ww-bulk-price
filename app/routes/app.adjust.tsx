@@ -459,23 +459,28 @@ export default function AdjustPage() {
       const nextVariants: PickedVariant[] = [];
       for (const item of selected as any[]) {
         if (!item) continue;
-        // If merchant picked every variant of a product (or the product itself),
-        // we store it as a "whole product" entry. Otherwise each selected variant
-        // goes into the variants bucket.
+        // Shopify's resourcePicker returns the product with a `variants` array
+        // containing only what the merchant actually picked. If the merchant
+        // picked the whole product the array will list every variant. If they
+        // drilled in and picked one of four, only that one is in the array.
+        //
+        // The old heuristic looked at v.selected and wrongly collapsed a one
+        // of four selection into a whole product. Always treat the returned
+        // variants as the literal selection. If the picker returns no variants
+        // array at all (edge case, never seen in practice) fall back to storing
+        // the product id so downstream matching still works.
         const rawVariants = Array.isArray(item.variants) ? item.variants : [];
-        const allVariantsSelected = rawVariants.length > 0 && rawVariants.every((v: any) => v.selected !== false);
-        if (allVariantsSelected || item.variants == null) {
+        if (rawVariants.length === 0) {
           nextProducts.push({ id: String(item.id), title: String(item.title || "Untitled product") });
-        } else {
-          for (const v of rawVariants) {
-            if (v && v.selected !== false) {
-              nextVariants.push({
-                id: String(v.id),
-                title: String(v.title || "Default"),
-                productTitle: String(item.title || ""),
-              });
-            }
-          }
+          continue;
+        }
+        for (const v of rawVariants) {
+          if (!v || !v.id) continue;
+          nextVariants.push({
+            id: String(v.id),
+            title: String(v.title || "Default"),
+            productTitle: String(item.title || ""),
+          });
         }
       }
       setPickedProducts(nextProducts);
