@@ -108,6 +108,7 @@ export type DiffRow = {
   productTitle?: string;
   variantTitle?: string;
   sku?: string | null;
+  imageUrl?: string | null;
   before: { price: string; compareAtPrice: string | null };
   after: { price: string; compareAtPrice: string | null };
   priceChanged: boolean;

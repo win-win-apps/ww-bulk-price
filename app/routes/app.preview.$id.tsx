@@ -152,8 +152,25 @@ export default function PreviewPage() {
     ) : (
       ""
     );
+    const thumb = d.imageUrl ? (
+      <img
+        src={d.imageUrl}
+        alt={d.productTitle || ""}
+        width={40}
+        height={40}
+        style={{ width: 40, height: 40, objectFit: "cover", borderRadius: 6, border: "1px solid var(--p-color-border)", flexShrink: 0 }}
+      />
+    ) : (
+      <div aria-hidden style={{ width: 40, height: 40, borderRadius: 6, background: "var(--p-color-bg-surface-secondary)", border: "1px solid var(--p-color-border)", flexShrink: 0 }} />
+    );
+    const productCell = (
+      <InlineStack gap="200" blockAlign="center" wrap={false}>
+        {thumb}
+        <Text as="span" variant="bodyMd">{d.productTitle || "-"}</Text>
+      </InlineStack>
+    );
     return [
-      d.productTitle || "-",
+      productCell,
       d.variantTitle || "-",
       curPrice,
       curCompare,

@@ -309,6 +309,7 @@ type PreviewDiff = {
   productTitle: string;
   variantTitle: string;
   sku: string | null;
+  imageUrl: string | null;
   before: { price: string; compareAtPrice: string | null };
   after: { price: string; compareAtPrice: string | null };
   priceChanged: boolean;
@@ -355,6 +356,19 @@ export default function AdjustPage() {
     fd.set("intent", "preview");
     previewFetcher.submit(fd, { method: "post" });
   }, [previewFetcher]);
+
+  // Auto-run the preview once on mount so merchants see it without clicking.
+  // The default state (adjust by 10% on all products) is a valid rule so this
+  // always returns something on a fresh page load.
+  const didAutoPreview = useRef(false);
+  useEffect(() => {
+    if (didAutoPreview.current) return;
+    didAutoPreview.current = true;
+    // Defer one tick so the form ref is attached and the hidden inputs are
+    // populated from initial state.
+    const t = setTimeout(() => computePreview(), 0);
+    return () => clearTimeout(t);
+  }, [computePreview]);
 
   const [title, setTitle] = useState<string>(defaultTitle());
   const [ruleKind, setRuleKind] = useState<"adjust" | "sale">("adjust");
@@ -1130,6 +1144,45 @@ function ConditionRow({
 }
 
 /**
+ * Tiny product/variant thumbnail for the preview rows. Falls back to a soft
+ * placeholder box when the product has no image at all.
+ */
+function Thumbnail({ src, alt }: { src: string | null; alt: string }) {
+  const size = 40;
+  if (!src) {
+    return (
+      <div
+        aria-hidden
+        style={{
+          width: size,
+          height: size,
+          borderRadius: 6,
+          background: "var(--p-color-bg-surface-secondary)",
+          border: "1px solid var(--p-color-border)",
+          flexShrink: 0,
+        }}
+      />
+    );
+  }
+  return (
+    <img
+      src={src}
+      alt={alt}
+      width={size}
+      height={size}
+      style={{
+        width: size,
+        height: size,
+        objectFit: "cover",
+        borderRadius: 6,
+        border: "1px solid var(--p-color-border)",
+        flexShrink: 0,
+      }}
+    />
+  );
+}
+
+/**
  * Paginated diff table used in the inline preview card below Step 3.
  * Shows current price, current compare-at, new price, new compare-at,
  * change percent, and any flag badge, with client-side pagination.
@@ -1175,8 +1228,14 @@ function InlinePreviewTable({
     ) : (
       ""
     );
+    const productCell = (
+      <InlineStack gap="200" blockAlign="center" wrap={false}>
+        <Thumbnail src={d.imageUrl} alt={d.productTitle || ""} />
+        <Text as="span" variant="bodyMd">{d.productTitle || "-"}</Text>
+      </InlineStack>
+    );
     return [
-      d.productTitle || "-",
+      productCell,
       d.variantTitle || "-",
       curPrice,
       curCompare,

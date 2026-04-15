@@ -34,6 +34,9 @@ export type VariantRow = {
   variantId: string;
   variantTitle: string;
   sku: string | null;
+  // URL of the variant's image, or the product's featured image as a fallback.
+  // Used for thumbnails in the preview table.
+  imageUrl: string | null;
   price: string;
   compareAtPrice: string | null;
   cost: string | null;
@@ -59,8 +62,10 @@ const PRODUCT_VARIANTS_PAGE_QUERY = `#graphql
         price
         compareAtPrice
         inventoryQuantity
+        image { url altText }
         product {
           id title handle productType vendor tags status isGiftCard
+          featuredImage { url altText }
           collections(first: 50) { nodes { id } }
         }
         inventoryItem {
@@ -90,7 +95,8 @@ export async function fetchAllVariants(admin: { graphql: GraphQLFn }): Promise<V
             price: string;
             compareAtPrice: string | null;
             inventoryQuantity: number | null;
-            product: { id: string; title: string; handle: string; productType: string; vendor: string; tags: string[]; status: string; isGiftCard: boolean; collections: { nodes: Array<{ id: string }> } };
+            image: { url: string; altText: string | null } | null;
+            product: { id: string; title: string; handle: string; productType: string; vendor: string; tags: string[]; status: string; isGiftCard: boolean; featuredImage: { url: string; altText: string | null } | null; collections: { nodes: Array<{ id: string }> } };
             inventoryItem: { id: string; unitCost: { amount: string } | null } | null;
           }>;
         };
@@ -114,6 +120,7 @@ export async function fetchAllVariants(admin: { graphql: GraphQLFn }): Promise<V
         variantId: n.id,
         variantTitle: n.title,
         sku: n.sku,
+        imageUrl: n.image?.url ?? n.product.featuredImage?.url ?? null,
         price: n.price,
         compareAtPrice: n.compareAtPrice,
         cost: n.inventoryItem?.unitCost?.amount ?? null,

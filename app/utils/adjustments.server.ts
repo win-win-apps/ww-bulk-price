@@ -272,6 +272,7 @@ export function buildAdjustmentDiffs(input: AdjustmentInput, variants: VariantRo
       productTitle: v.productTitle,
       variantTitle: v.variantTitle,
       sku: v.sku,
+      imageUrl: v.imageUrl,
       before: { price: v.price, compareAtPrice: v.compareAtPrice },
       after: {
         price: newPriceNum.toFixed(2),
