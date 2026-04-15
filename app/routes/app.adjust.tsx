@@ -591,7 +591,11 @@ export default function AdjustPage() {
         compareAtPrice: scoped.before.compareAtPrice,
         imageUrl: scoped.imageUrl ?? null,
       };
-    } else if (data.sampleVariant) {
+    } else if (scopeMode === "all" && data.sampleVariant) {
+      // Only fall back to the generic store sample when the scope is "all
+      // products". For specific/conditions scopes we must show a real matched
+      // variant or nothing at all, otherwise the merchant briefly sees a
+      // product they did not select.
       sample = {
         title: data.sampleVariant.title,
         price: data.sampleVariant.price,
@@ -640,7 +644,7 @@ export default function AdjustPage() {
       afterPrice: fmt(after),
       afterCompare: compareAfter ? `$${Number(compareAfter).toFixed(2)}` : null,
     };
-  }, [previewIsFresh, previewPayload, data.sampleVariant, amount, mode, rounding, compareAt, ruleKind]);
+  }, [previewIsFresh, previewPayload, data.sampleVariant, scopeMode, amount, mode, rounding, compareAt, ruleKind]);
 
   return (
     <Page
