@@ -18,7 +18,7 @@ import {
   Tag,
   Box,
 } from "@shopify/polaris";
-import { DeleteIcon, PlusIcon } from "@shopify/polaris-icons";
+import { ArrowLeftIcon, DeleteIcon, PlusIcon } from "@shopify/polaris-icons";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { useCallback, useMemo, useState } from "react";
 import { authenticate } from "../shopify.server";
@@ -259,10 +259,20 @@ export default function AdjustPage() {
   const [showRounding, setShowRounding] = useState(false);
   const [compareAt, setCompareAt] = useState<CompareAtMode>("leave");
 
-  // Scope state
+  // Scope state. scopePickerOpen controls whether we show the 3 cards or the
+  // expanded body of the selected card with a back button.
   const [scopeMode, setScopeMode] = useState<AdjustmentScope>("all");
+  const [scopePickerOpen, setScopePickerOpen] = useState<boolean>(true);
   const [pickedProducts, setPickedProducts] = useState<PickedProduct[]>([]);
   const [pickedVariants, setPickedVariants] = useState<PickedVariant[]>([]);
+
+  const chooseScope = useCallback((mode: AdjustmentScope) => {
+    setScopeMode(mode);
+    setScopePickerOpen(false);
+  }, []);
+  const backToScopePicker = useCallback(() => {
+    setScopePickerOpen(true);
+  }, []);
   const [conjunction, setConjunction] = useState<Conjunction>("AND");
   const [conditions, setConditions] = useState<Condition[]>([
     { field: "product_type", operator: "is", value: "" },
@@ -306,30 +316,6 @@ export default function AdjustPage() {
       setPickedVariants(nextVariants);
     } catch (err) {
       // Cancel is not an error; swallow
-      console.debug("resourcePicker closed:", err);
-    }
-  }, [shopify]);
-
-  const openVariantPicker = useCallback(async () => {
-    try {
-      const selected = await shopify.resourcePicker({
-        type: "variant",
-        multiple: true,
-        action: "select",
-      });
-      if (!selected) return;
-      const nextVariants: PickedVariant[] = [];
-      for (const item of selected as any[]) {
-        if (!item) continue;
-        nextVariants.push({
-          id: String(item.id),
-          title: String(item.title || "Default"),
-          productTitle: String(item.product?.title || ""),
-        });
-      }
-      setPickedVariants(nextVariants);
-      setPickedProducts([]);
-    } catch (err) {
       console.debug("resourcePicker closed:", err);
     }
   }, [shopify]);
@@ -633,42 +619,59 @@ export default function AdjustPage() {
                 <Text as="span" variant="headingMd" tone="subdued">Select which products should change in price</Text>
               </InlineStack>
 
-              <ChoiceList
-                title=""
-                titleHidden
-                selected={[scopeMode]}
-                choices={[
-                  {
-                    label: `All products (${data.totalVariants.toLocaleString()} variants)`,
-                    value: "all",
-                  },
-                  {
-                    label: "Specific products or variants",
-                    value: "specific",
-                    helpText: "Pick individual products or variants from a searchable list.",
-                  },
-                  {
-                    label: "Products matching conditions",
-                    value: "conditions",
-                    helpText: "Match by vendor, product type, tag, inventory, status, and more. Combine with AND / OR.",
-                  },
-                ]}
-                onChange={(v) => setScopeMode((v[0] || "all") as AdjustmentScope)}
-              />
               <input type="hidden" name="scope_mode" value={scopeMode} />
 
-              {/* Specific products branch */}
-              {scopeMode === "specific" && (
-                <Box paddingBlockStart="200">
+              {scopePickerOpen ? (
+                <BlockStack gap="300">
+                  <ScopeCard
+                    title={`All products (${data.totalVariants.toLocaleString()} variants)`}
+                    description="Apply this price change to every variant in your catalog."
+                    selected={scopeMode === "all"}
+                    onClick={() => chooseScope("all")}
+                  />
+                  <ScopeCard
+                    title="Specific products"
+                    description="Pick individual products or variants from a searchable list."
+                    selected={scopeMode === "specific"}
+                    onClick={() => chooseScope("specific")}
+                  />
+                  <ScopeCard
+                    title="Products matching conditions"
+                    description="Match by vendor, product type, tag, inventory, status, and more. Combine with AND or OR."
+                    selected={scopeMode === "conditions"}
+                    onClick={() => chooseScope("conditions")}
+                  />
+                </BlockStack>
+              ) : (
+                <BlockStack gap="300">
+                  <InlineStack gap="200" blockAlign="center">
+                    <Button variant="plain" icon={ArrowLeftIcon} onClick={backToScopePicker}>
+                      Change selection
+                    </Button>
+                    <Text as="span" variant="bodyMd" tone="subdued">
+                      {scopeMode === "all" ? "All products" : scopeMode === "specific" ? "Specific products" : "Products matching conditions"}
+                    </Text>
+                  </InlineStack>
+
+                  {/* All products summary */}
+                  {scopeMode === "all" && (
+                    <Box padding="300" borderWidth="025" borderColor="border" borderRadius="200">
+                      <Text as="p" variant="bodyMd">
+                        Every variant in your catalog ({data.totalVariants.toLocaleString()} total) will be updated by this rule.
+                      </Text>
+                    </Box>
+                  )}
+
+                  {/* Specific products branch */}
+                  {scopeMode === "specific" && (
                   <BlockStack gap="300">
                     <InlineStack gap="200">
-                      <Button onClick={openProductPicker}>Browse products</Button>
-                      <Button onClick={openVariantPicker}>Browse variants</Button>
+                      <Button onClick={openProductPicker}>Select products</Button>
                     </InlineStack>
 
                     {pickedProducts.length === 0 && pickedVariants.length === 0 ? (
                       <Text as="p" variant="bodyMd" tone="subdued">
-                        No products selected yet. Use the buttons above to pick from your catalog.
+                        No products selected yet. Use the button above to pick from your catalog. You can also expand a product in the picker to choose only specific variants.
                       </Text>
                     ) : (
                       <BlockStack gap="200">
@@ -711,49 +714,48 @@ export default function AdjustPage() {
                       <input key={`pv-${v.id}`} type="hidden" name="picked_variant_ids" value={v.id} />
                     ))}
                   </BlockStack>
-                </Box>
-              )}
+                  )}
 
-              {/* Conditions branch */}
-              {scopeMode === "conditions" && (
-                <Box paddingBlockStart="200">
-                  <BlockStack gap="400">
-                    <BlockStack gap="200">
-                      <Text as="p" variant="bodyMd" fontWeight="medium">Products must match:</Text>
-                      <ChoiceList
-                        title=""
-                        titleHidden
-                        selected={[conjunction]}
-                        choices={[
-                          { label: "all conditions", value: "AND" },
-                          { label: "any condition", value: "OR" },
-                        ]}
-                        onChange={(v) => setConjunction((v[0] || "AND") as Conjunction)}
-                      />
-                      <input type="hidden" name="conjunction" value={conjunction} />
-                    </BlockStack>
-
-                    <BlockStack gap="300">
-                      {conditions.map((c, idx) => (
-                        <ConditionRow
-                          key={idx}
-                          condition={c}
-                          onChange={(patch) => updateCondition(idx, patch)}
-                          onDelete={conditions.length > 1 ? () => removeCondition(idx) : undefined}
+                  {/* Conditions branch */}
+                  {scopeMode === "conditions" && (
+                    <BlockStack gap="400">
+                      <BlockStack gap="200">
+                        <Text as="p" variant="bodyMd" fontWeight="medium">Products must match:</Text>
+                        <ChoiceList
+                          title=""
+                          titleHidden
+                          selected={[conjunction]}
+                          choices={[
+                            { label: "all conditions", value: "AND" },
+                            { label: "any condition", value: "OR" },
+                          ]}
+                          onChange={(v) => setConjunction((v[0] || "AND") as Conjunction)}
                         />
-                      ))}
+                        <input type="hidden" name="conjunction" value={conjunction} />
+                      </BlockStack>
+
+                      <BlockStack gap="300">
+                        {conditions.map((c, idx) => (
+                          <ConditionRow
+                            key={idx}
+                            condition={c}
+                            onChange={(patch) => updateCondition(idx, patch)}
+                            onDelete={conditions.length > 1 ? () => removeCondition(idx) : undefined}
+                          />
+                        ))}
+                      </BlockStack>
+
+                      <InlineStack>
+                        <Button icon={PlusIcon} onClick={addCondition}>
+                          Add another condition
+                        </Button>
+                      </InlineStack>
+
+                      {/* Serialized conditions for submission */}
+                      <input type="hidden" name="conditions_json" value={JSON.stringify(conditions)} />
                     </BlockStack>
-
-                    <InlineStack>
-                      <Button icon={PlusIcon} onClick={addCondition}>
-                        Add another condition
-                      </Button>
-                    </InlineStack>
-
-                    {/* Serialized conditions for submission */}
-                    <input type="hidden" name="conditions_json" value={JSON.stringify(conditions)} />
-                  </BlockStack>
-                </Box>
+                  )}
+                </BlockStack>
               )}
             </BlockStack>
           </Card>
@@ -913,5 +915,50 @@ function ConditionRow({
         )}
       </InlineStack>
     </Box>
+  );
+}
+
+/**
+ * Clickable scope card used in Step 3's card picker. Matches the elevated
+ * card look with a subtle highlight when selected. Clicking it selects the
+ * mode and collapses the picker to show the relevant flow.
+ */
+function ScopeCard({
+  title,
+  description,
+  selected,
+  onClick,
+}: {
+  title: string;
+  description: string;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick();
+        }
+      }}
+      style={{ cursor: "pointer" }}
+    >
+      <Box
+        padding="400"
+        borderWidth="025"
+        borderColor={selected ? "border-emphasis" : "border"}
+        borderRadius="200"
+        background={selected ? "bg-surface-selected" : "bg-surface"}
+      >
+        <BlockStack gap="100">
+          <Text as="h3" variant="headingSm">{title}</Text>
+          <Text as="p" variant="bodyMd" tone="subdued">{description}</Text>
+        </BlockStack>
+      </Box>
+    </div>
   );
 }
