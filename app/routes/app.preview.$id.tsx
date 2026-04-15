@@ -55,16 +55,21 @@ export const action = async ({ params, request }: ActionFunctionArgs) => {
     return json({ error: `This run would touch ${staged.diffs.length} variants. Maximum per run is ${MAX_VARIANTS_PER_APPLY}. Split your CSV and try again.` });
   }
 
-  const label = `${staged.source === "csv" ? "CSV apply" : "Quick adjust"} ${new Date().toLocaleString()}`;
+  const sourceLabel = staged.source === "csv" ? "CSV apply" : staged.source === "sale" ? "Sale" : "Quick adjust";
+  const fallbackLabel = `${sourceLabel} ${new Date().toLocaleString()}`;
+  const label = staged.title || fallbackLabel;
   const snapshot = await writeSnapshot(
     session.shop,
     label,
     staged.diffs,
     new Map(staged.currentByVariant)
   );
+  const autoDescription = staged.description || `${staged.diffs.length} variant${staged.diffs.length === 1 ? "" : "s"} changed via ${staged.source}`;
   const run = await prisma.applyRun.create({
     data: {
       shop: session.shop,
+      title: label,
+      description: autoDescription,
       status: "running",
       totalRows: staged.diffs.length,
       source: staged.source,

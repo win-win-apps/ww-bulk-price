@@ -3,13 +3,19 @@
 import type { DiffRow } from "./csv.server";
 import type { VariantRow } from "./shopify-queries.server";
 
+export type StagedSource = "csv" | "adjustment" | "sale";
+
 type StagedBatch = {
   id: string;
   shop: string;
   createdAt: number;
   diffs: DiffRow[];
   fileName: string;
-  source: "csv" | "adjustment";
+  source: StagedSource;
+  // Optional merchant-provided title carried through to the ApplyRun row
+  title?: string;
+  // Auto generated human-readable description of the run
+  description?: string;
   // Snapshot of current variants at preview time, used to write the undo snapshot at apply time
   currentByVariant: Array<[string, VariantRow]>;
 };
@@ -28,7 +34,9 @@ export function stageDiffs(opts: {
   shop: string;
   diffs: DiffRow[];
   fileName: string;
-  source: "csv" | "adjustment";
+  source: StagedSource;
+  title?: string;
+  description?: string;
   currentByVariant: Map<string, VariantRow>;
 }): string {
   gc();
@@ -40,6 +48,8 @@ export function stageDiffs(opts: {
     diffs: opts.diffs,
     fileName: opts.fileName,
     source: opts.source,
+    title: opts.title,
+    description: opts.description,
     currentByVariant: Array.from(opts.currentByVariant.entries()),
   });
   return id;

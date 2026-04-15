@@ -53,11 +53,36 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
   }
 
+  // Build a helpful description from the diff. We compute average % change so
+  // the history list can say "Lowers prices of 312 variants by ~10%".
+  let avgPct = 0;
+  let pctCount = 0;
+  for (const d of diffs) {
+    if (d.pctChange != null && !Number.isNaN(d.pctChange)) {
+      avgPct += d.pctChange;
+      pctCount++;
+    }
+  }
+  const meanPct = pctCount > 0 ? avgPct / pctCount : null;
+  const noun = diffs.length === 1 ? "variant" : "variants";
+  let description: string;
+  if (meanPct == null) {
+    description = `CSV upload: ${diffs.length} ${noun} updated`;
+  } else if (meanPct < -0.5) {
+    description = `Lowers prices of ${diffs.length} ${noun} by ~${Math.abs(meanPct).toFixed(1)}% (CSV)`;
+  } else if (meanPct > 0.5) {
+    description = `Raises prices of ${diffs.length} ${noun} by ~${meanPct.toFixed(1)}% (CSV)`;
+  } else {
+    description = `Updates ${diffs.length} ${noun} via CSV`;
+  }
+
   const stagingId = stageDiffs({
     shop: session.shop,
     diffs,
     fileName,
     source: "csv",
+    title: `CSV: ${fileName}`,
+    description,
     currentByVariant: currentMap,
   });
 

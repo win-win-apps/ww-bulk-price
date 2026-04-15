@@ -49,16 +49,18 @@ model PriceSnapshot {
 
 // Run history for the app UI
 model ApplyRun {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   shop        String
-  status      String   // running | completed | failed | undone
-  totalRows   Int      @default(0)
-  successRows Int      @default(0)
-  failedRows  Int      @default(0)
-  errors      String?  // JSON array of { variantId, message }
+  title       String?   // User-provided or auto-generated, e.g. "BFCM 2026 15% off"
+  description String?   // Human readable summary, e.g. "Lowers prices of 312 variants by 15%"
+  status      String    // running | completed | failed | undone
+  totalRows   Int       @default(0)
+  successRows Int       @default(0)
+  failedRows  Int       @default(0)
+  errors      String?   // JSON array of { variantId, message }
   snapshotId  String?
-  source      String   @default("csv") // csv | adjustment
-  createdAt   DateTime @default(now())
+  source      String    @default("csv") // csv | adjustment | sale | undo
+  createdAt   DateTime  @default(now())
   completedAt DateTime?
 
   @@index([shop, createdAt])

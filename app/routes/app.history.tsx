@@ -5,12 +5,14 @@ import {
   Page,
   Card,
   BlockStack,
+  InlineStack,
   Text,
-  DataTable,
   Button,
   Banner,
   Badge,
-  InlineStack,
+  Box,
+  Divider,
+  EmptyState,
 } from "@shopify/polaris";
 import { authenticate, prisma } from "../shopify.server";
 import { updateVariantsForProduct } from "../utils/shopify-queries.server";
@@ -20,7 +22,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const runs = await prisma.applyRun.findMany({
     where: { shop: session.shop },
     orderBy: { createdAt: "desc" },
-    take: 50,
+    take: 100,
   });
   return json({ runs });
 };
@@ -35,13 +37,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (!run.snapshotId) return json({ error: "No snapshot available for this run." });
   const snap = await prisma.priceSnapshot.findFirst({ where: { id: run.snapshotId, shop: session.shop } });
   if (!snap) return json({ error: "Snapshot missing." });
-  if (snap.undone) return json({ error: "Already undone." });
+  if (snap.undone) return json({ error: "This run has already been reverted." });
 
   const before: Array<{ variantId: string; productId: string; price: string; compareAtPrice: string | null }> =
     JSON.parse(snap.beforeJson);
   if (before.length === 0) return json({ error: "Snapshot is empty." });
 
-  // Group by productId
+  // Group by productId — productVariantsBulkUpdate is one call per product.
   const byProduct = new Map<string, Array<(typeof before)[number]>>();
   for (const b of before) {
     const arr = byProduct.get(b.productId) || [];
@@ -69,10 +71,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   await prisma.priceSnapshot.update({ where: { id: snap.id }, data: { undone: true } });
-  await prisma.applyRun.update({ where: { id: run.id }, data: { status: "undone" } });
+  await prisma.applyRun.update({ where: { id: run.id }, data: { status: "reverted" } });
   await prisma.applyRun.create({
     data: {
       shop: session.shop,
+      title: `Reverted: ${run.title || "Untitled run"}`,
+      description: `Restored prices of ${before.length} variant${before.length === 1 ? "" : "s"} to the state before the original run`,
       status: failed === 0 ? "completed" : "failed",
       totalRows: before.length,
       successRows: ok,
@@ -86,6 +90,38 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   return redirect(`/app/history?undone=${run.id}`);
 };
 
+function formatDateTime(d: Date | string): string {
+  const dt = typeof d === "string" ? new Date(d) : d;
+  const now = new Date();
+  const sameDay =
+    dt.getFullYear() === now.getFullYear() &&
+    dt.getMonth() === now.getMonth() &&
+    dt.getDate() === now.getDate();
+  if (sameDay) {
+    return `Today, ${dt.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`;
+  }
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (
+    dt.getFullYear() === yesterday.getFullYear() &&
+    dt.getMonth() === yesterday.getMonth() &&
+    dt.getDate() === yesterday.getDate()
+  ) {
+    return `Yesterday, ${dt.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`;
+  }
+  return dt.toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+function statusBadge(status: string) {
+  if (status === "completed") return <Badge tone="success">Complete</Badge>;
+  if (status === "partial") return <Badge tone="warning">Partial</Badge>;
+  if (status === "failed") return <Badge tone="critical">Failed</Badge>;
+  if (status === "reverted") return <Badge tone="info">Reverted</Badge>;
+  if (status === "undone") return <Badge tone="info">Reverted</Badge>;
+  if (status === "running") return <Badge tone="attention">Running</Badge>;
+  return <Badge>{status}</Badge>;
+}
+
 export default function HistoryPage() {
   const { runs } = useLoaderData<typeof loader>();
   const [sp] = useSearchParams();
@@ -95,62 +131,81 @@ export default function HistoryPage() {
   const nav = useNavigation();
   const busy = nav.state !== "idle";
 
-  const rows = runs.map((r) => [
-    new Date(r.createdAt).toLocaleString(),
-    r.source,
-    String(r.totalRows),
-    String(r.successRows),
-    String(r.failedRows),
-    <StatusBadge key={`s-${r.id}`} status={r.status} />,
-    r.source !== "undo" && r.snapshotId && r.status !== "undone" ? (
-      <Form method="post" key={`u-${r.id}`}>
-        <input type="hidden" name="runId" value={r.id} />
-        <Button submit size="slim" loading={busy}>Undo</Button>
-      </Form>
-    ) : (
-      ""
-    ),
-  ]);
-
   return (
     <Page
-      title="History"
-      subtitle="Every apply run from the last 30 days. Hit Undo on any row to restore the prices that were live before that run."
+      title="Price change jobs"
+      subtitle="Every CSV upload, quick adjust, sale, and undo from the last 30 days. Click Revert on any row to roll that run back."
       backAction={{ url: "/app" }}
+      primaryAction={{ content: "Create new price change job", url: "/app/adjust" }}
     >
       <BlockStack gap="400">
         {ran && <Banner tone="success" title="Changes applied" />}
-        {undone && <Banner tone="success" title="Changes reverted" />}
+        {undone && <Banner tone="success" title="Run reverted" />}
         {actionData?.error && <Banner tone="critical" title={actionData.error} />}
-        <Card>
+
+        <Card padding="0">
           {runs.length === 0 ? (
-            <BlockStack gap="200">
-              <Text as="p" variant="bodyMd" fontWeight="semibold">No runs yet</Text>
-              <Text as="p" variant="bodyMd" tone="subdued">
-                Once you apply a CSV or a quick adjust, the run will show up here with a one click Undo
-                button. Snapshots are kept for 30 days.
-              </Text>
-              <InlineStack gap="200">
-                <Button url="/app/upload" variant="primary">Upload CSV</Button>
-                <Button url="/app/adjust">Quick adjust</Button>
-              </InlineStack>
-            </BlockStack>
+            <Box padding="800">
+              <EmptyState
+                heading="No price change jobs yet"
+                action={{ content: "Upload CSV", url: "/app/upload" }}
+                secondaryAction={{ content: "Quick adjust", url: "/app/adjust" }}
+                image=""
+              >
+                <Text as="p">
+                  Once you apply a CSV or a quick adjust, every run shows up here with a one click
+                  revert button. Snapshots are kept for 30 days.
+                </Text>
+              </EmptyState>
+            </Box>
           ) : (
-            <DataTable
-              columnContentTypes={["text", "text", "numeric", "numeric", "numeric", "text", "text"]}
-              headings={["When", "Source", "Total", "OK", "Failed", "Status", ""]}
-              rows={rows}
-            />
+            <BlockStack gap="0">
+              {runs.map((r, idx) => {
+                const canRevert =
+                  r.source !== "undo" &&
+                  r.snapshotId != null &&
+                  r.status !== "reverted" &&
+                  r.status !== "undone" &&
+                  r.status !== "running";
+                const title = r.title || (r.source === "csv" ? "CSV upload" : r.source === "sale" ? "Sale" : r.source === "undo" ? "Revert" : "Quick adjust");
+                const description = r.description || `${r.successRows}/${r.totalRows} variants updated${r.failedRows > 0 ? `, ${r.failedRows} failed` : ""}`;
+                return (
+                  <Box key={r.id}>
+                    <Box paddingInline="500" paddingBlock="400">
+                      <InlineStack align="space-between" blockAlign="start" wrap={false} gap="400">
+                        <Box minWidth="0">
+                          <BlockStack gap="100">
+                            <Text as="h3" variant="headingSm" breakWord>{title}</Text>
+                            <Text as="p" variant="bodySm" tone="subdued">
+                              {formatDateTime(r.createdAt)}
+                              {r.source && r.source !== "undo" ? ` · ${r.source === "csv" ? "CSV" : r.source === "sale" ? "Sale" : "Quick adjust"}` : ""}
+                            </Text>
+                            <Text as="p" variant="bodyMd">{description}</Text>
+                          </BlockStack>
+                        </Box>
+                        <BlockStack gap="200" align="end">
+                          <InlineStack gap="200" blockAlign="center">
+                            {statusBadge(r.status)}
+                          </InlineStack>
+                          {canRevert && (
+                            <Form method="post">
+                              <input type="hidden" name="runId" value={r.id} />
+                              <Button submit size="slim" loading={busy}>
+                                Revert
+                              </Button>
+                            </Form>
+                          )}
+                        </BlockStack>
+                      </InlineStack>
+                    </Box>
+                    {idx < runs.length - 1 && <Divider />}
+                  </Box>
+                );
+              })}
+            </BlockStack>
           )}
         </Card>
       </BlockStack>
     </Page>
   );
-}
-
-function StatusBadge({ status }: { status: string }) {
-  if (status === "completed") return <Badge tone="success">completed</Badge>;
-  if (status === "failed") return <Badge tone="critical">failed</Badge>;
-  if (status === "undone") return <Badge tone="info">undone</Badge>;
-  return <Badge>{status}</Badge>;
 }

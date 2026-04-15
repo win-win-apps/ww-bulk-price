@@ -24,6 +24,11 @@ export type VariantRow = {
   productId: string;
   productTitle: string;
   productHandle: string;
+  productType: string;
+  vendor: string;
+  tags: string[];
+  productStatus: string; // ACTIVE | DRAFT | ARCHIVED
+  isGiftCard: boolean;
   variantId: string;
   variantTitle: string;
   sku: string | null;
@@ -31,6 +36,7 @@ export type VariantRow = {
   compareAtPrice: string | null;
   cost: string | null;
   inventoryItemId: string | null;
+  inventoryQuantity: number | null;
   currencyCode: string;
 };
 
@@ -44,7 +50,8 @@ const PRODUCT_VARIANTS_PAGE_QUERY = `#graphql
         sku
         price
         compareAtPrice
-        product { id title handle }
+        inventoryQuantity
+        product { id title handle productType vendor tags status isGiftCard }
         inventoryItem {
           id
           unitCost { amount }
@@ -71,7 +78,8 @@ export async function fetchAllVariants(admin: { graphql: GraphQLFn }): Promise<V
             sku: string | null;
             price: string;
             compareAtPrice: string | null;
-            product: { id: string; title: string; handle: string };
+            inventoryQuantity: number | null;
+            product: { id: string; title: string; handle: string; productType: string; vendor: string; tags: string[]; status: string; isGiftCard: boolean };
             inventoryItem: { id: string; unitCost: { amount: string } | null } | null;
           }>;
         };
@@ -84,6 +92,11 @@ export async function fetchAllVariants(admin: { graphql: GraphQLFn }): Promise<V
         productId: n.product.id,
         productTitle: n.product.title,
         productHandle: n.product.handle,
+        productType: n.product.productType || "",
+        vendor: n.product.vendor || "",
+        tags: Array.isArray(n.product.tags) ? n.product.tags : [],
+        productStatus: n.product.status || "ACTIVE",
+        isGiftCard: !!n.product.isGiftCard,
         variantId: n.id,
         variantTitle: n.title,
         sku: n.sku,
@@ -91,6 +104,7 @@ export async function fetchAllVariants(admin: { graphql: GraphQLFn }): Promise<V
         compareAtPrice: n.compareAtPrice,
         cost: n.inventoryItem?.unitCost?.amount ?? null,
         inventoryItemId: n.inventoryItem?.id ?? null,
+        inventoryQuantity: typeof n.inventoryQuantity === "number" ? n.inventoryQuantity : null,
         currencyCode,
       });
     }
